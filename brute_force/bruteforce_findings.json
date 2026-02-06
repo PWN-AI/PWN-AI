@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "tool": "bruteforce_agent",
+    "version": "1.0",
+    "started_at_unix": 1770395351,
+    "duration_seconds": 7.5,
+    "targets_total": 1,
+    "targets_scanned": 1,
+    "targets_blocked": 0,
+    "scanner": "dvwa",
+    "security_level": "high"
+  },
+  "raw_outputs": {},
+  "status": "vulnerable",
+  "credentials_found": [
+    {
+      "username": "admin",
+      "password": "password",
+      "security_level": "high"
+    }
+  ],
+  "findings": [
+    {
+      "tool": "dvwa_bruteforce",
+      "name": "DVWA Valid Credentials (high)",
+      "severity": "critical",
+      "url": "http://localhost/vulnerabilities/brute/",
+      "evidence": "username=admin, password=password, security=high",
+      "raw": null,
+      "finding_id": "cf454db5e94f86bc"
+    }
+  ]
+}
