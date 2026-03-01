@@ -1,18 +1,16 @@
-GET /vulnerabilities/sqli_blind/?id=1&Submit=Submit&user_token=5555d2ce6ed39e5b314f5d95ceff04d7 HTTP/1.1
-Host: localhost
+GET /vulnerabilities/sqli/?id=1&Submit=Submit HTTP/1.1
+Host: 31.97.159.151
 sec-ch-ua: "Not(A:Brand";v="8", "Chromium";v="144"
 sec-ch-ua-mobile: ?0
 sec-ch-ua-platform: "Linux"
 Accept-Language: en-US,en;q=0.9
 Upgrade-Insecure-Requests: 1
-User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36
 Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
 Sec-Fetch-Site: same-origin
 Sec-Fetch-Mode: navigate
 Sec-Fetch-User: ?1
 Sec-Fetch-Dest: document
-Referer: http://localhost/vulnerabilities/sqli_blind/
 Accept-Encoding: gzip, deflate, br
-Cookie: id=1; PHPSESSID=0pg4olkh64e8ghjsu01l6f7r12; security=impossible
+Cookie: id=1; PHPSESSID=j9iu08d3skqfdjr7ltrn05tct3; security=low
 Connection: keep-alive
 

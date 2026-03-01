@@ -1,0 +1,28 @@
+ollama:
+  base_url: "http://localhost:11434"
+
+models:
+  head:
+    model: "deepseek-r1:8b" 
+    temperature: 0.2
+    # change the reasoning to true/false for wanted models (especially qwen and deepseek)
+    reasoning: false
+  implementor:
+    model: "qwen2.5-coder:7b"
+    temperature: 0.1
+
+runtime:
+  max_tasks: 1
+  max_replans: 8
+  max_new_tasks_per_replan: 1
+  ask_permission_per_action: true
+  auto_approve: false
+
+# models available for testing:
+#  - "Dolphin3.0-Llama3.1-8B-GGUF:Q4_0"
+#  - "qwen2.5-coder:7b"
+#  - "llama3.1:latest"
+#  - "gemma3:latest"
+#  - "deepseek-r1:8b"
+#  - "qwen3:4b"
+#  - "qwen3:8b"

@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "name": "sqli-basic-url",
+      "enabled": true,
+      "goal": "Test SQL injection signal and collect initial evidence",
+      "target_url": "http://localhost/vulnerabilities/sqli/",
+      "username": "admin",
+      "password": "password",
+      "login_url": "http://localhost/login.php",
+      "username_field": "username",
+      "password_field": "password"
+    },
+    {
+      "name": "sqli-request-file",
+      "enabled": true,
+      "goal": "Test SQLi flow via saved request file",
+      "target_request_file": "sql_injection/req"
+    },
+    {
+      "name": "cmdi-request-file",
+      "enabled": true,
+      "goal": "Test command-injection wrapper path",
+      "target_request_file": "command_injection/req"
+    }
+  ]
+}

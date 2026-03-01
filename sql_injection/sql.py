@@ -1,10 +1,11 @@
 import os
+import sys
 import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-SQLMAP_BIN = "/var/data/python/bin/sqlmap"
+SQLMAP_BIN = r"D:\PWN-AI\tools\sqlmap-1.10\sqlmap.py"
 
 ALLOWED_FLAGS = {
     # targeting
@@ -129,11 +130,13 @@ def run_sqlmap_tool(
         if not os.path.exists(request_file):
             raise FileNotFoundError(request_file)
         options["-r"] = request_file
+    else:
+        options["-u"] = url
 
     # Enforce batch by default (agent-friendly)
     options.setdefault("--batch", True)
 
-    cmd = [SQLMAP_BIN] + _build_args(options)
+    cmd = ([sys.executable, SQLMAP_BIN] if SQLMAP_BIN.lower().endswith(".py") else [SQLMAP_BIN]) + _build_args(options)
 
     # Run without shell to prevent injection
     proc = subprocess.run(
@@ -141,6 +144,7 @@ def run_sqlmap_tool(
         cwd=cwd,
         capture_output=True,
         text=True,
+        timeout=max_runtime_seconds,
         shell=False,
     )
 

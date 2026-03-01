@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+artifacts/
+
+.venv/
+
+tools/
+*.zip
+
+AI_Project_Architecture.md
+
+pyvenv.cfg

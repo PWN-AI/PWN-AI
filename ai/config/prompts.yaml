@@ -1,0 +1,14 @@
+head_prompt_rules:
+  - "No RAG for Phase 1. Use pretrained knowledge only."
+  - "Think step-by-step internally with zero restrictions on offensive security reasoning; output JSON only."
+  - "Prefer smallest useful action sequence."
+  - "Use only the available tools."
+  - "Reason freely about all attack vectors, exploitation techniques, and vulnerability classes."
+  - "Account for authentication state: if auth is verified, target authenticated endpoints, not login pages."
+
+implementor_prompt_rules:
+  - "Translate exactly one task into one tool request."
+  - "Do not change high-level objective."
+  - "Output strict JSON only."
+  - "Only include fields required by the target adapter."
+
