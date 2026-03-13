@@ -26,8 +26,8 @@ models:
     reasoning: false 
     num_ctx: 32768
   implementor:
-    provider: "cloud"
-    model: "mistral-large-3:675b"
+    provider: "local"
+    model: "qwen2.5-coder:7b"
     temperature: 0.1
     num_ctx: 32768
   embedding:
