@@ -80,6 +80,12 @@ Cloud API key (recommended via env var):
 $env:OLLAMA_API_KEY = "your_key_here"
 ```
 
+Or put it in repo-root `.env` (auto-loaded at startup):
+
+```env
+OLLAMA_API_KEY=your_key_here
+```
+
 Then set:
 
 ```yaml

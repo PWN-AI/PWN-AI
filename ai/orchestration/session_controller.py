@@ -9,6 +9,7 @@ from typing import Any, Dict
 from ai.agents.head_qwen3_8b.planner import HeadPlanner
 from ai.agents.implementor_qwen25coder_7b.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
+from ai.config.env_loader import load_project_env
 from ai.execution.auth import attempt_pre_auth
 from ai.execution.run_manager import RunManager
 from ai.llm.ollama_client import build_ollama_clients, resolve_model_connection
@@ -70,6 +71,7 @@ def _build_target(args: argparse.Namespace) -> Dict[str, Any]:
 
 def run_session(args: argparse.Namespace) -> SessionState:
     project_root = Path(__file__).resolve().parents[2]
+    load_project_env(project_root)
     config_path = (project_root / args.config).resolve()
 
     head_llm, impl_llm, cfg = build_ollama_clients(config_path)
