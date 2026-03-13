@@ -30,7 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         default="ai/config/models.local.yaml",
-        help="Path to local model/runtime config",
+        help="Path to model/runtime config (supports per-role local/cloud providers)",
     )
     parser.add_argument(
         "--output-dir",

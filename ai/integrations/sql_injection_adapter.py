@@ -111,7 +111,7 @@ if __name__ == "__main__":
         tool_name="sql_injection",
         action="dump",
         target_mode="url",
-        target=TargetSpec(url="http://31.97.159.151/vulnerabilities/sqli/?id=1&Submit=Submit"),
+        target=TargetSpec(url="http://localhost/vulnerabilities/sqli/?id=1&Submit=Submit"),
         args={
             "options": {
                 "--dump-all": True,

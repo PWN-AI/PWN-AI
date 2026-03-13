@@ -4,12 +4,14 @@ import sys
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from ai.agents.react_agent import ReActResult, run_react_loop
 from ai.contracts.schemas import ExecutionResult, Finding, TargetSpec, TaskSpec
 from ai.llm.json_utils import parse_json_object
+from ai.rag.retriever import ToolRetriever
 
 
 def _is_login_like_url(url: str) -> bool:
@@ -40,17 +42,19 @@ def _message_text(content: Any) -> str:
 
 
 class HeadPlanner:
-    """Head planner with FULL LLM AUTONOMY.
+    """Head planner with FULL LLM AUTONOMY and ReAct-based RAG retrieval.
 
     The LLM controls the entire plan — number of tasks, tools, targets,
-    flags, and escalation chains. No hardcoded expansion, no hardcoded
-    fallback chains. The only safety net is retargeting login-like URLs
-    to discovered authenticated endpoints.
+    flags, and escalation chains. It can retrieve tool documentation
+    during reasoning via the ReAct loop. No hardcoded expansion, no
+    hardcoded fallback chains. The only safety net is retargeting
+    login-like URLs to discovered authenticated endpoints.
     """
 
-    def __init__(self, llm: Any, prompt_path: Path):
+    def __init__(self, llm: Any, prompt_path: Path, retriever: Optional[ToolRetriever] = None):
         self.llm = llm
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
+        self.retriever = retriever
 
     @dataclass
     class PlannerDecision:
@@ -299,8 +303,9 @@ class HeadPlanner:
             "CRITICAL: For injection tools (sql_injection, command_injection), the target URL "
             "MUST contain an injectable parameter (e.g., ?id=1). Analyze the discovered endpoints "
             "and pick the best one. If no parameterized URL exists, use --data for POST injection.\n"
-            "Return JSON only.\n"
-            "Required JSON shape:\n"
+            "IMPORTANT: Before choosing tool arguments, retrieve the tool documentation to ensure "
+            "you use correct argument names and values.\n"
+            "Return your final_answer as JSON with this shape:\n"
             "{\n"
             '  "thinking_summary": ["short planning bullets"],\n'
             '  "tasks": [TaskSpec, ...]\n'
@@ -309,14 +314,29 @@ class HeadPlanner:
             f"INPUT:\n{json.dumps(prompt_input, indent=2)}"
         )
         try:
-            print("\n[Head Planner] Invoking LLM for initial plan...")
-            response = self.llm.invoke(
-                [
-                    SystemMessage(content=self.system_prompt),
-                    HumanMessage(content=user_message),
-                ]
-            )
-            text = _message_text(getattr(response, "content", response))
+            print("\n[Head Planner] Invoking ReAct loop for initial plan...")
+
+            if self.retriever is not None:
+                react_result = run_react_loop(
+                    llm=self.llm,
+                    system_prompt=self.system_prompt,
+                    user_message=user_message,
+                    retriever=self.retriever,
+                    label="Head Planner",
+                )
+                text = react_result.final_output
+                print(f"\n[Head Planner] ReAct completed: {react_result.total_llm_calls} LLM call(s), "
+                      f"{len(react_result.retrieved_context)} retrieval(s)")
+            else:
+                # Fallback to direct LLM call if no retriever
+                response = self.llm.invoke(
+                    [
+                        SystemMessage(content=self.system_prompt),
+                        HumanMessage(content=user_message),
+                    ]
+                )
+                text = _message_text(getattr(response, "content", response))
+
             print(f"\n[Head Planner] Raw response length: {len(text)} chars")
             parsed = parse_json_object(text)
             tasks = self._extract_tasks(parsed, max_tasks=max_tasks)
@@ -463,7 +483,9 @@ class HeadPlanner:
             "If the tool found a vulnerability, escalate "
             "(e.g., scan confirmed SQLi → enumerate_dbs → dump).\n"
             "If the tool failed, pivot to a different approach or stop.\n"
-            "Return JSON only with this schema:\n"
+            "IMPORTANT: Before choosing tool arguments for new tasks, retrieve the tool "
+            "documentation to ensure you use correct argument names and values.\n"
+            "Return your final_answer as JSON with this schema:\n"
             "{\n"
             '  "thinking_summary": ["short bullets"],\n'
             '  "task_notes": ["concise facts to remember about this result"],\n'
@@ -477,15 +499,29 @@ class HeadPlanner:
         )
 
         try:
-            print(f"\n[Head Planner] Invoking LLM for re-plan after {current_task.id} "
+            print(f"\n[Head Planner] Invoking ReAct loop for re-plan after {current_task.id} "
                   f"(iteration {replan_iteration})...")
-            response = self.llm.invoke(
-                [
-                    SystemMessage(content=self.system_prompt),
-                    HumanMessage(content=user_message),
-                ]
-            )
-            text = _message_text(getattr(response, "content", response))
+
+            if self.retriever is not None:
+                react_result = run_react_loop(
+                    llm=self.llm,
+                    system_prompt=self.system_prompt,
+                    user_message=user_message,
+                    retriever=self.retriever,
+                    label="Head Planner (Replan)",
+                )
+                text = react_result.final_output
+                print(f"\n[Head Planner] Replan ReAct completed: {react_result.total_llm_calls} LLM call(s), "
+                      f"{len(react_result.retrieved_context)} retrieval(s)")
+            else:
+                response = self.llm.invoke(
+                    [
+                        SystemMessage(content=self.system_prompt),
+                        HumanMessage(content=user_message),
+                    ]
+                )
+                text = _message_text(getattr(response, "content", response))
+
             print(f"\n[Head Planner] Re-plan raw response length: {len(text)} chars")
             parsed = parse_json_object(text)
             tasks = self._extract_tasks(parsed, max_tasks=max_new_tasks)

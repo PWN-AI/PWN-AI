@@ -11,9 +11,11 @@ from ai.agents.implementor_qwen25coder_7b.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
 from ai.execution.auth import attempt_pre_auth
 from ai.execution.run_manager import RunManager
-from ai.llm.ollama_client import build_ollama_clients
+from ai.llm.ollama_client import build_ollama_clients, resolve_model_connection
 from ai.orchestration.langgraph_flow import build_phase1_graph
 from ai.orchestration.state import SessionState
+from ai.rag.ingest import ensure_index_ready
+from ai.rag.retriever import ToolRetriever
 from ai.reporting.report_generator import ReportGenerator
 from ai.safety.action_filter import ActionFilter
 
@@ -39,7 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         default="ai/config/models.local.yaml",
-        help="Path to local model/runtime config",
+        help="Path to model/runtime config (supports per-role local/cloud providers)",
     )
     parser.add_argument(
         "--output-dir",
@@ -71,14 +73,56 @@ def run_session(args: argparse.Namespace) -> SessionState:
     config_path = (project_root / args.config).resolve()
 
     head_llm, impl_llm, cfg = build_ollama_clients(config_path)
+    head_conn = resolve_model_connection(cfg, "head")
+    impl_conn = resolve_model_connection(cfg, "implementor")
+    print(
+        f"[LLM] head provider: {head_conn['provider']} | "
+        f"base_url: {head_conn['base_url']} | model: {cfg['models']['head']['model']}"
+    )
+    print(
+        f"[LLM] implementor provider: {impl_conn['provider']} | "
+        f"base_url: {impl_conn['base_url']} | model: {cfg['models']['implementor']['model']}"
+    )
+
+    # ── Initialize RAG retriever ──
+    rag_cfg = cfg.get("rag", {})
+    rag_enabled = bool(rag_cfg.get("enabled", True))
+    retriever = None
+
+    if rag_enabled:
+        embed_conn = resolve_model_connection(cfg, "embedding")
+        ollama_base_url = embed_conn["base_url"]
+        ollama_headers = embed_conn.get("headers", {})
+        embedding_model = cfg.get("models", {}).get("embedding", {}).get("model", "nomic-embed-text")
+        persist_dir = project_root / rag_cfg.get("persist_dir", "ai/rag/index")
+        print(
+            f"[RAG] embedding provider: {embed_conn['provider']} | "
+            f"base_url: {ollama_base_url} | model: {embedding_model}"
+        )
+
+        try:
+            store = ensure_index_ready(
+                persist_dir=persist_dir,
+                ollama_base_url=ollama_base_url,
+                embedding_model=embedding_model,
+                ollama_headers=ollama_headers,
+            )
+            retriever = ToolRetriever(store)
+            print(f"[RAG] Tool knowledge base initialized ({store._index.ntotal} vectors).")
+        except Exception as exc:
+            print(f"[RAG] WARNING: Failed to initialize RAG: {exc}")
+            print("[RAG] Continuing without RAG retrieval (LLMs will use pretrained knowledge only).")
+            retriever = None
 
     planner = HeadPlanner(
         llm=head_llm,
         prompt_path=project_root / "ai" / "agents" / "head_qwen3_8b" / "system_prompt.md",
+        retriever=retriever,
     )
     compiler = ImplementorCompiler(
         llm=impl_llm,
         prompt_path=project_root / "ai" / "agents" / "implementor_qwen25coder_7b" / "system_prompt.md",
+        retriever=retriever,
     )
     action_filter = ActionFilter(
         ask_permission=bool(cfg.get("runtime", {}).get("ask_permission_per_action", True)),
@@ -116,7 +160,7 @@ def run_session(args: argparse.Namespace) -> SessionState:
         }
         if args.username and args.password
         else {},
-        "phase": "phase1_no_rag",
+        "phase": "phase1_react_rag" if retriever else "phase1_no_rag",
     }
     notes = []
 

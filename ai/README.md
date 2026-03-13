@@ -1,7 +1,7 @@
 # PwnAI Phase 1 (Local Single-Session Orchestrator)
 
 This is the Phase 1 implementation for the AI layer:
-- Two local Ollama models
+- Two Ollama-backed models (local or cloud mode)
   - Head LLM: `qwen3:8b`
   - Implementor LLM: `qwen2.5-coder:7b`
 - LangGraph orchestration loop
@@ -60,6 +60,35 @@ You can copy `ai/cases.example.json` and edit it for your own testing matrix.
 
 Model and runtime config:
 - `ai/config/models.local.yaml`
+
+Choose provider per role in config:
+
+```yaml
+models:
+  head:
+    provider: "cloud"       # or "local"
+  implementor:
+    provider: "local"       # or "cloud"
+  embedding:
+    provider: "local"       # or "cloud"
+```
+
+Cloud API key (recommended via env var):
+
+```bash
+# PowerShell
+$env:OLLAMA_API_KEY = "your_key_here"
+```
+
+Then set:
+
+```yaml
+ollama:
+  providers:
+    cloud:
+      base_url: "https://ollama.com"
+      api_key_env: "OLLAMA_API_KEY"
+```
 
 ## Notes
 

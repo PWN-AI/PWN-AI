@@ -1,5 +1,5 @@
 GET /vulnerabilities/sqli/?id=1&Submit=Submit HTTP/1.1
-Host: 31.97.159.151
+Host: localhost
 sec-ch-ua: "Not(A:Brand";v="8", "Chromium";v="144"
 sec-ch-ua-mobile: ?0
 sec-ch-ua-platform: "Linux"
@@ -11,6 +11,6 @@ Sec-Fetch-Mode: navigate
 Sec-Fetch-User: ?1
 Sec-Fetch-Dest: document
 Accept-Encoding: gzip, deflate, br
-Cookie: id=1; PHPSESSID=j9iu08d3skqfdjr7ltrn05tct3; security=low
+Cookie: id=1; PHPSESSID=1usfg3d4bdmdrpbpju3fmas894; security=low
 Connection: keep-alive
 

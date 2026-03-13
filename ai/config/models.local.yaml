@@ -1,15 +1,39 @@
 ollama:
-  base_url: "http://localhost:11434"
+  # Fallback provider if a model role omits `provider`.
+  mode: "local"
+
+  providers:
+    # Local Ollama server
+    local:
+      base_url: "http://localhost:11434"
+
+    # Ollama cloud API
+    cloud:
+      base_url: "https://ollama.com"
+      # Prefer env var over hardcoding key in this file
+      api_key_env: "OLLAMA_API_KEY"
+      auth_header: "Authorization"
+      auth_scheme: "Bearer"
+      # api_key: ""  # Optional, discouraged: don't commit secrets
 
 models:
   head:
-    model: "deepseek-r1:8b" 
-    temperature: 0.2
+    # Choose per-role provider: local | cloud
+    provider: "cloud"
+    model: "kimi-k2.5" 
+    temperature: 0.2 #original 0.2
     # change the reasoning to true/false for wanted models (especially qwen and deepseek)
-    reasoning: false
+    reasoning: false 
+    num_ctx: 32768
   implementor:
-    model: "qwen2.5-coder:7b"
+    provider: "cloud"
+    model: "mistral-large-3:675b"
     temperature: 0.1
+    num_ctx: 32768
+  embedding:
+    provider: "local"
+    model: "nomic-embed-text"
+
 
 runtime:
   max_tasks: 1
@@ -17,6 +41,14 @@ runtime:
   max_new_tasks_per_replan: 1
   ask_permission_per_action: true
   auto_approve: false
+
+rag:
+  enabled: true
+  persist_dir: "ai/rag/index"
+  # Maximum ReAct iterations for head planner (plan/replan)
+  max_react_iterations_head: 4
+  # Maximum ReAct iterations for implementor
+  max_react_iterations_impl: 3
 
 # models available for testing:
 #  - "Dolphin3.0-Llama3.1-8B-GGUF:Q4_0"

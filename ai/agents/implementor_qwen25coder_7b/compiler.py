@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from ai.agents.react_agent import run_react_loop
 from ai.contracts.schemas import TaskSpec, ToolRequest
 from ai.llm.json_utils import parse_json_object
+from ai.rag.retriever import ToolRetriever
 
 
 def _message_text(content: Any) -> str:
@@ -25,9 +27,10 @@ def _message_text(content: Any) -> str:
 
 
 class ImplementorCompiler:
-    def __init__(self, llm: Any, prompt_path: Path):
+    def __init__(self, llm: Any, prompt_path: Path, retriever: Optional[ToolRetriever] = None):
         self.llm = llm
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
+        self.retriever = retriever
 
     def _fallback_request(self, task: TaskSpec, operator_context: Dict[str, Any] | None = None) -> ToolRequest:
         """Minimal fallback — pass through task args, only add cookie if available."""
@@ -84,17 +87,32 @@ class ImplementorCompiler:
             "if a flag isn't in your output, it won't be used.\n"
             "CRITICAL: For sql_injection, the target URL MUST have a query parameter (e.g., ?id=1). "
             "If it doesn't, add one or use --data for POST injection.\n"
-            "Return JSON only.\n"
+            "IMPORTANT: Retrieve the tool documentation for the specific tool to verify "
+            "argument names and valid values before constructing your output.\n"
+            "Return your final_answer as JSON.\n"
             f"INPUT:\n{json.dumps(prompt_input, indent=2)}"
         )
         try:
-            response = self.llm.invoke(
-                [
-                    SystemMessage(content=self.system_prompt),
-                    HumanMessage(content=user_message),
-                ]
-            )
-            text = _message_text(getattr(response, "content", response))
+            if self.retriever is not None:
+                react_result = run_react_loop(
+                    llm=self.llm,
+                    system_prompt=self.system_prompt,
+                    user_message=user_message,
+                    retriever=self.retriever,
+                    label="Implementor",
+                )
+                text = react_result.final_output
+                print(f"[Implementor] ReAct completed: {react_result.total_llm_calls} LLM call(s), "
+                      f"{len(react_result.retrieved_context)} retrieval(s)")
+            else:
+                response = self.llm.invoke(
+                    [
+                        SystemMessage(content=self.system_prompt),
+                        HumanMessage(content=user_message),
+                    ]
+                )
+                text = _message_text(getattr(response, "content", response))
+
             parsed = parse_json_object(text)
             request = ToolRequest.model_validate(parsed)
 
