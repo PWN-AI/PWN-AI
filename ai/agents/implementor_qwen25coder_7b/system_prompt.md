@@ -50,14 +50,38 @@ If operator_context contains auth_cookie, you MUST include it:
 
 ═══════════════════════════════════════════════════════════════
 
-Your final_answer Action Input must be this JSON format:
+Your final_answer Action Input must be this JSON format.
+
+For sql_injection (args use "options" dict with CLI flags):
 {
   "task_id": "task-01",
   "tool_name": "sql_injection",
   "action": "scan",
   "target_mode": "url",
-  "target": {"url": "http://target/..."},
-  "args": {"options": {"--level": fill_in, "--risk": fill_in, "--cookie": "PHPSESSID=abc; security=fill_in"}},
-  "reasoning": "Testing id parameter for SQL injection with session cookie"
+  "target": {"url": "http://target/page?id=1"},
+  "args": {"options": {"--level": 2, "--risk": 1, "--cookie": "PHPSESSID=abc; security=low"}},
+  "reasoning": "Testing id parameter for SQL injection"
+}
+
+For command_injection (args use flat Python kwargs, NOT options dict):
+{
+  "task_id": "task-01",
+  "tool_name": "command_injection",
+  "action": "scan",
+  "target_mode": "url",
+  "target": {"url": "http://target/cmd_page"},
+  "args": {"data": "ip=127.0.0.1&Submit=submit", "parameter": "ip", "cookie": "PHPSESSID=abc; security=low", "level": 2},
+  "reasoning": "Testing ip parameter for command injection"
+}
+
+For nuclei_xss / brute_force (args use flat kwargs):
+{
+  "task_id": "task-01",
+  "tool_name": "nuclei_xss",
+  "action": "scan",
+  "target_mode": "url",
+  "target": {"url": "http://target/page"},
+  "args": {"cookie": "PHPSESSID=abc; security=low"},
+  "reasoning": "Scanning for XSS vulnerabilities"
 }
 

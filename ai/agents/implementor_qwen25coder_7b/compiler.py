@@ -40,12 +40,15 @@ class ImplementorCompiler:
 
         if task.tool_hint == "sql_injection":
             opts = dict(args.get("options", {}))
-            # Pass through whatever the head planner specified — don't add action-specific flags
-            # Let the head planner's args be the source of truth
             cookie = ctx.get("auth_cookie", "")
             if cookie and "--cookie" not in opts:
                 opts["--cookie"] = cookie
             args["options"] = opts
+
+        elif task.tool_hint == "command_injection":
+            cookie = ctx.get("auth_cookie", "")
+            if cookie and "cookie" not in args:
+                args["cookie"] = cookie
 
         if task.tool_hint == "nuclei_xss" and action != "scan":
             action = "scan"
@@ -127,6 +130,20 @@ class ImplementorCompiler:
                         if flag not in impl_opts and value not in (None, "", False):
                             impl_opts[flag] = value
                     impl_args["options"] = impl_opts
+                    request = request.model_copy(update={"args": impl_args})
+
+            elif task.tool_hint == "command_injection":
+                # Translate head LLM's CLI flags to kwarg names before merging
+                # to avoid duplicates (head uses --cookie, impl uses cookie)
+                from ai.integrations.command_injection_adapter import _FLAG_TO_KWARG
+                head_args = task.args or {}
+                if head_args:
+                    impl_args = dict(request.args)
+                    for key, value in head_args.items():
+                        # Convert CLI flags to kwarg names
+                        kwarg_key = _FLAG_TO_KWARG.get(key, key) if key.startswith("-") else key
+                        if kwarg_key not in impl_args and value not in (None, "", False):
+                            impl_args[kwarg_key] = value
                     request = request.model_copy(update={"args": impl_args})
 
             return request
