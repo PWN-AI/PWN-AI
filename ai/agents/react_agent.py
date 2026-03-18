@@ -255,7 +255,11 @@ def _process_steps(
             print(f"[{label}] Final answer captured.")
 
         elif step.action in RETRIEVAL_ACTIONS:
-            observation = _execute_retrieval(step, retriever, label)
+            try:
+                observation = _execute_retrieval(step, retriever, label)
+            except Exception as exc:
+                print(f"[{label}] Retrieval failed ({step.action}): {exc}", file=sys.stderr)
+                observation = f"[retrieval unavailable: {exc}]"
             retrieved_contexts.append(observation)
             retrieval_results.append((step, observation))
 
