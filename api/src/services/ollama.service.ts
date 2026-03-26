@@ -1,15 +1,56 @@
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import config from '../config';
 import { ChatMessage, ChatResponse, OllamaModel, SessionParams } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 class AIService {
   private projectRoot: string;
+  private pythonPath: string;
 
   constructor() {
     // PWN-AI project root (parent of api/)
     this.projectRoot = path.resolve(__dirname, '../../../');
+    
+    // Resolve Python path - try .venv first, then configured path, then fallback to 'python'
+    this.pythonPath = this.resolvePythonPath();
+    console.log(`[AI Service] Using Python: ${this.pythonPath}`);
+  }
+
+  private resolvePythonPath(): string {
+    // Check configured path (could be absolute or relative)
+    const configuredPath = config.pythonPath;
+    
+    // If it's an absolute path, use it directly
+    if (path.isAbsolute(configuredPath)) {
+      if (fs.existsSync(configuredPath)) {
+        return configuredPath;
+      }
+    }
+    
+    // Try relative to project root
+    const venvPath = path.join(this.projectRoot, configuredPath);
+    if (fs.existsSync(venvPath)) {
+      return venvPath;
+    }
+    
+    // Try common venv locations
+    const commonPaths = [
+      path.join(this.projectRoot, '.venv/bin/python'),
+      path.join(this.projectRoot, 'venv/bin/python'),
+      path.join(this.projectRoot, '.venv/Scripts/python.exe'), // Windows
+      path.join(this.projectRoot, 'venv/Scripts/python.exe'),  // Windows
+    ];
+    
+    for (const p of commonPaths) {
+      if (fs.existsSync(p)) {
+        return p;
+      }
+    }
+    
+    // Fallback to system python
+    return 'python';
   }
 
   /**
@@ -95,7 +136,7 @@ class AIService {
       let output = '';
       let errorOutput = '';
 
-      const proc: ChildProcess = spawn('python', args, {
+      const proc: ChildProcess = spawn(this.pythonPath, args, {
         cwd: this.projectRoot,
         env: { ...process.env },
       });
@@ -172,7 +213,7 @@ content = getattr(response, "content", str(response))
 print(json.dumps({"content": content}))
 `;
 
-      const proc: ChildProcess = spawn('python', ['-c', pythonCode], {
+      const proc: ChildProcess = spawn(this.pythonPath, ['-c', pythonCode], {
         cwd: this.projectRoot,
         env: { ...process.env },
       });
@@ -265,7 +306,7 @@ for role, model_cfg in models.items():
 print(json.dumps(result))
 `;
 
-      const proc: ChildProcess = spawn('python', ['-c', pythonCode], {
+      const proc: ChildProcess = spawn(this.pythonPath, ['-c', pythonCode], {
         cwd: this.projectRoot,
       });
 
@@ -299,7 +340,7 @@ print(json.dumps(result))
    */
   async isAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
-      const proc: ChildProcess = spawn('python', ['-c', 'import ai; print("ok")'], {
+      const proc: ChildProcess = spawn(this.pythonPath, ['-c', 'import ai; print("ok")'], {
         cwd: this.projectRoot,
       });
 

@@ -6,12 +6,45 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.aiService = void 0;
 const child_process_1 = require("child_process");
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const config_1 = __importDefault(require("../config"));
 const uuid_1 = require("uuid");
 class AIService {
     constructor() {
         // PWN-AI project root (parent of api/)
         this.projectRoot = path_1.default.resolve(__dirname, '../../../');
+        // Resolve Python path - try .venv first, then configured path, then fallback to 'python'
+        this.pythonPath = this.resolvePythonPath();
+        console.log(`[AI Service] Using Python: ${this.pythonPath}`);
+    }
+    resolvePythonPath() {
+        // Check configured path (could be absolute or relative)
+        const configuredPath = config_1.default.pythonPath;
+        // If it's an absolute path, use it directly
+        if (path_1.default.isAbsolute(configuredPath)) {
+            if (fs_1.default.existsSync(configuredPath)) {
+                return configuredPath;
+            }
+        }
+        // Try relative to project root
+        const venvPath = path_1.default.join(this.projectRoot, configuredPath);
+        if (fs_1.default.existsSync(venvPath)) {
+            return venvPath;
+        }
+        // Try common venv locations
+        const commonPaths = [
+            path_1.default.join(this.projectRoot, '.venv/bin/python'),
+            path_1.default.join(this.projectRoot, 'venv/bin/python'),
+            path_1.default.join(this.projectRoot, '.venv/Scripts/python.exe'), // Windows
+            path_1.default.join(this.projectRoot, 'venv/Scripts/python.exe'), // Windows
+        ];
+        for (const p of commonPaths) {
+            if (fs_1.default.existsSync(p)) {
+                return p;
+            }
+        }
+        // Fallback to system python
+        return 'python';
     }
     /**
      * Run a pentest session using the Python AI framework
@@ -89,7 +122,7 @@ class AIService {
             const sessionId = (0, uuid_1.v4)();
             let output = '';
             let errorOutput = '';
-            const proc = (0, child_process_1.spawn)('python', args, {
+            const proc = (0, child_process_1.spawn)(this.pythonPath, args, {
                 cwd: this.projectRoot,
                 env: { ...process.env },
             });
@@ -159,7 +192,7 @@ content = getattr(response, "content", str(response))
 # Output as JSON
 print(json.dumps({"content": content}))
 `;
-            const proc = (0, child_process_1.spawn)('python', ['-c', pythonCode], {
+            const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', pythonCode], {
                 cwd: this.projectRoot,
                 env: { ...process.env },
             });
@@ -247,7 +280,7 @@ for role, model_cfg in models.items():
 
 print(json.dumps(result))
 `;
-            const proc = (0, child_process_1.spawn)('python', ['-c', pythonCode], {
+            const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', pythonCode], {
                 cwd: this.projectRoot,
             });
             let output = '';
@@ -278,7 +311,7 @@ print(json.dumps(result))
      */
     async isAvailable() {
         return new Promise((resolve) => {
-            const proc = (0, child_process_1.spawn)('python', ['-c', 'import ai; print("ok")'], {
+            const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', 'import ai; print("ok")'], {
                 cwd: this.projectRoot,
             });
             proc.on('close', (code) => {

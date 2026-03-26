@@ -15,9 +15,11 @@ exports.config = {
     // JWT
     jwtSecret: process.env.JWT_SECRET || 'default-secret-change-in-production',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
-    // Ollama
+    // Ollama (kept for reference)
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
     ollamaModel: process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b',
+    // Python - use .venv if available
+    pythonPath: process.env.PYTHON_PATH || '.venv/bin/python',
 };
 exports.default = exports.config;
 //# sourceMappingURL=index.js.map

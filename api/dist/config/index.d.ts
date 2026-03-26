@@ -5,6 +5,7 @@ export declare const config: {
     jwtExpiresIn: string;
     ollamaBaseUrl: string;
     ollamaModel: string;
+    pythonPath: string;
 };
 export default config;
 //# sourceMappingURL=index.d.ts.map

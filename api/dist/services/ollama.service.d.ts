@@ -1,7 +1,9 @@
 import { ChatMessage, ChatResponse, OllamaModel, SessionParams } from '../types';
 declare class AIService {
     private projectRoot;
+    private pythonPath;
     constructor();
+    private resolvePythonPath;
     /**
      * Run a pentest session using the Python AI framework
      * This calls main.py which handles all Ollama communication
