@@ -33,4 +33,27 @@ export interface JwtPayload extends AuthPayload {
     iat: number;
     exp: number;
 }
+export interface SessionParams {
+    goal: string;
+    targetUrl?: string;
+    targetRequestFile?: string;
+    username?: string;
+    password?: string;
+    loginUrl?: string;
+    usernameField?: string;
+    passwordField?: string;
+    submitField?: string;
+    submitValue?: string;
+    extraFormFields?: Record<string, string>;
+    authTimeout?: number;
+    insecureTls?: boolean;
+    crawlDepth?: number;
+    config?: string;
+    outputDir?: string;
+    autoApprove?: boolean;
+    printFinalState?: boolean;
+    maxTasks?: number;
+    maxReplans?: number;
+    maxNewTasksPerReplan?: number;
+}
 //# sourceMappingURL=index.d.ts.map

@@ -5,7 +5,7 @@ export declare const chatController: {
      */
     completions(req: Request, res: Response, next: NextFunction): Promise<void>;
     /**
-     * Run a full pentest session
+     * Run a full pentest session with all parameters
      */
     runSession(req: Request, res: Response, next: NextFunction): Promise<void>;
     listModels(req: Request, res: Response, next: NextFunction): Promise<void>;

@@ -44,26 +44,62 @@ exports.chatController = {
         }
     },
     /**
-     * Run a full pentest session
+     * Run a full pentest session with all parameters
      */
     async runSession(req, res, next) {
         try {
-            const { goal, targetUrl, username, password, autoApprove } = req.body;
+            const { 
+            // Required
+            goal, 
+            // Target
+            targetUrl, targetRequestFile, 
+            // Auth
+            username, password, loginUrl, usernameField, passwordField, submitField, submitValue, extraFormFields, authTimeout, insecureTls, 
+            // Crawling
+            crawlDepth, 
+            // Runtime
+            config, outputDir, autoApprove, printFinalState, maxTasks, maxReplans, maxNewTasksPerReplan, } = req.body;
+            // Validation
             if (!goal) {
-                res.status(400).json({ error: 'Goal is required' });
+                res.status(400).json({ error: 'goal is required' });
                 return;
             }
-            if (!targetUrl) {
-                res.status(400).json({ error: 'Target URL is required' });
+            if (!targetUrl && !targetRequestFile) {
+                res.status(400).json({ error: 'Either targetUrl or targetRequestFile is required' });
                 return;
             }
-            const result = await ollama_service_1.default.runSession({
+            if (targetUrl && targetRequestFile) {
+                res.status(400).json({ error: 'Provide only one of targetUrl or targetRequestFile' });
+                return;
+            }
+            if (crawlDepth !== undefined && (crawlDepth < 0 || crawlDepth > 3)) {
+                res.status(400).json({ error: 'crawlDepth must be between 0 and 3' });
+                return;
+            }
+            const params = {
                 goal,
                 targetUrl,
+                targetRequestFile,
                 username,
                 password,
-                autoApprove: autoApprove ?? true,
-            });
+                loginUrl,
+                usernameField,
+                passwordField,
+                submitField,
+                submitValue,
+                extraFormFields,
+                authTimeout,
+                insecureTls,
+                crawlDepth,
+                config,
+                outputDir,
+                autoApprove: autoApprove ?? true, // Default to auto-approve for API usage
+                printFinalState,
+                maxTasks,
+                maxReplans,
+                maxNewTasksPerReplan,
+            };
+            const result = await ollama_service_1.default.runSession(params);
             res.json({
                 sessionId: result.sessionId,
                 output: result.output,

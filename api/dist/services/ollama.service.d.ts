@@ -1,4 +1,4 @@
-import { ChatMessage, ChatResponse, OllamaModel } from '../types';
+import { ChatMessage, ChatResponse, OllamaModel, SessionParams } from '../types';
 declare class AIService {
     private projectRoot;
     constructor();
@@ -6,13 +6,7 @@ declare class AIService {
      * Run a pentest session using the Python AI framework
      * This calls main.py which handles all Ollama communication
      */
-    runSession(options: {
-        goal: string;
-        targetUrl?: string;
-        username?: string;
-        password?: string;
-        autoApprove?: boolean;
-    }): Promise<{
+    runSession(params: SessionParams): Promise<{
         output: string;
         sessionId: string;
     }>;

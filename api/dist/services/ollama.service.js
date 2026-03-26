@@ -17,20 +17,74 @@ class AIService {
      * Run a pentest session using the Python AI framework
      * This calls main.py which handles all Ollama communication
      */
-    async runSession(options) {
+    async runSession(params) {
         return new Promise((resolve, reject) => {
-            const args = ['main.py', '--goal', options.goal];
-            if (options.targetUrl) {
-                args.push('--target-url', options.targetUrl);
+            const args = ['main.py'];
+            // Required: goal
+            args.push('--goal', params.goal);
+            // Target (one of these required)
+            if (params.targetUrl) {
+                args.push('--target-url', params.targetUrl);
             }
-            if (options.username) {
-                args.push('--username', options.username);
+            if (params.targetRequestFile) {
+                args.push('--target-request-file', params.targetRequestFile);
             }
-            if (options.password) {
-                args.push('--password', options.password);
+            // Authentication
+            if (params.username) {
+                args.push('--username', params.username);
             }
-            if (options.autoApprove) {
+            if (params.password) {
+                args.push('--password', params.password);
+            }
+            if (params.loginUrl) {
+                args.push('--login-url', params.loginUrl);
+            }
+            if (params.usernameField) {
+                args.push('--username-field', params.usernameField);
+            }
+            if (params.passwordField) {
+                args.push('--password-field', params.passwordField);
+            }
+            if (params.submitField) {
+                args.push('--submit-field', params.submitField);
+            }
+            if (params.submitValue) {
+                args.push('--submit-value', params.submitValue);
+            }
+            if (params.extraFormFields) {
+                args.push('--extra-form-fields', JSON.stringify(params.extraFormFields));
+            }
+            if (params.authTimeout !== undefined) {
+                args.push('--auth-timeout', params.authTimeout.toString());
+            }
+            if (params.insecureTls) {
+                args.push('--insecure-tls');
+            }
+            // Crawling
+            if (params.crawlDepth !== undefined) {
+                args.push('--crawl-depth', params.crawlDepth.toString());
+            }
+            // Runtime options
+            if (params.config) {
+                args.push('--config', params.config);
+            }
+            if (params.outputDir) {
+                args.push('--output-dir', params.outputDir);
+            }
+            if (params.autoApprove) {
                 args.push('--auto-approve');
+            }
+            if (params.printFinalState) {
+                args.push('--print-final-state');
+            }
+            if (params.maxTasks !== undefined) {
+                args.push('--max-tasks', params.maxTasks.toString());
+            }
+            if (params.maxReplans !== undefined) {
+                args.push('--max-replans', params.maxReplans.toString());
+            }
+            if (params.maxNewTasksPerReplan !== undefined) {
+                args.push('--max-new-tasks-per-replan', params.maxNewTasksPerReplan.toString());
             }
             const sessionId = (0, uuid_1.v4)();
             let output = '';
@@ -56,11 +110,11 @@ class AIService {
             proc.on('error', (err) => {
                 reject(new Error(`Failed to start AI process: ${err.message}`));
             });
-            // Timeout after 10 minutes
+            // Timeout after 30 minutes for full sessions
             setTimeout(() => {
                 proc.kill();
-                reject(new Error('AI session timed out after 10 minutes'));
-            }, 600000);
+                reject(new Error('AI session timed out after 30 minutes'));
+            }, 1800000);
         });
     }
     /**

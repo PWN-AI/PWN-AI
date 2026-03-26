@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import aiService from '../services/ollama.service';
-import { ChatMessage } from '../types';
+import { ChatMessage, SessionParams } from '../types';
 
 export const chatController = {
   /**
@@ -45,29 +45,85 @@ export const chatController = {
   },
 
   /**
-   * Run a full pentest session
+   * Run a full pentest session with all parameters
    */
   async runSession(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { goal, targetUrl, username, password, autoApprove } = req.body;
-
-      if (!goal) {
-        res.status(400).json({ error: 'Goal is required' });
-        return;
-      }
-
-      if (!targetUrl) {
-        res.status(400).json({ error: 'Target URL is required' });
-        return;
-      }
-
-      const result = await aiService.runSession({
+      const {
+        // Required
         goal,
+        // Target
         targetUrl,
+        targetRequestFile,
+        // Auth
         username,
         password,
-        autoApprove: autoApprove ?? true,
-      });
+        loginUrl,
+        usernameField,
+        passwordField,
+        submitField,
+        submitValue,
+        extraFormFields,
+        authTimeout,
+        insecureTls,
+        // Crawling
+        crawlDepth,
+        // Runtime
+        config,
+        outputDir,
+        autoApprove,
+        printFinalState,
+        maxTasks,
+        maxReplans,
+        maxNewTasksPerReplan,
+      } = req.body;
+
+      // Validation
+      if (!goal) {
+        res.status(400).json({ error: 'goal is required' });
+        return;
+      }
+
+      if (!targetUrl && !targetRequestFile) {
+        res.status(400).json({ error: 'Either targetUrl or targetRequestFile is required' });
+        return;
+      }
+
+      if (targetUrl && targetRequestFile) {
+        res.status(400).json({ error: 'Provide only one of targetUrl or targetRequestFile' });
+        return;
+      }
+
+      if (crawlDepth !== undefined && (crawlDepth < 0 || crawlDepth > 3)) {
+        res.status(400).json({ error: 'crawlDepth must be between 0 and 3' });
+        return;
+      }
+
+      const params: SessionParams = {
+        goal,
+        targetUrl,
+        targetRequestFile,
+        username,
+        password,
+        loginUrl,
+        usernameField,
+        passwordField,
+        submitField,
+        submitValue,
+        extraFormFields,
+        authTimeout,
+        insecureTls,
+        crawlDepth,
+        config,
+        outputDir,
+        autoApprove: autoApprove ?? true, // Default to auto-approve for API usage
+        printFinalState,
+        maxTasks,
+        maxReplans,
+        maxNewTasksPerReplan,
+      };
+
+      const result = await aiService.runSession(params);
 
       res.json({
         sessionId: result.sessionId,
