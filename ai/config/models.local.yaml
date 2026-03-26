@@ -19,18 +19,18 @@ ollama:
 models:
   head:
     # Choose per-role provider: local | cloud
-    provider: "cloud"
-    model: "kimi-k2.5" 
+    provider: "local"
+    model: "llama3.1:latest" 
     temperature: 0.2 #original 0.2
     # change the reasoning to true/false for wanted models (especially qwen and deepseek)
     reasoning: false 
-    num_ctx: 262144 #32768
+    num_ctx: 32768 #32768
   implementor:
-    provider: "cloud"
-    model: "glm-5:cloud"
+    provider: "local"
+    model: "qwen2.5-coder:7b"
     temperature: 0.1
     reasoning: false
-    num_ctx: 262144 #32768
+    num_ctx: 32768 #32768
   embedding:
     provider: "local"
     model: "nomic-embed-text"

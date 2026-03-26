@@ -45,6 +45,8 @@ class SqlInjectionAdapter(ToolAdapter):
                 kwargs["url"] = request.target.url
             else:
                 kwargs["request_file"] = request.target.request_file
+            # Keep tool execution anchored to repo root (stable relative paths).
+            kwargs["cwd"] = str(self.project_root)
 
             # Remove meta-keys that are not sqlmap args
             kwargs.pop("max_duration", None)

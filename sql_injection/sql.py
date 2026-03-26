@@ -5,7 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-SQLMAP_BIN = r"D:\PWN-AI\tools\sqlmap-1.10\sqlmap.py"
+SQLMAP_BIN = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "sqlmap-1.10", "sqlmap.py")
 
 ALLOWED_FLAGS = {
     # targeting
