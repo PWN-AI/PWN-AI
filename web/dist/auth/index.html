@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PWN-AI Auth</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="page-glow page-glow--left"></div>
+      <div class="page-glow page-glow--right"></div>
+
+      <header class="site-topbar">
+        <a class="brand-lockup" href="/">
+          <img class="brand-lockup__wordmark" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
+        </a>
+
+        <nav class="site-nav">
+          <a class="nav-link" data-nav href="/">Home</a>
+          <a class="nav-link nav-link--active" data-nav href="/auth">Auth</a>
+          <a class="nav-link" data-nav href="/chat">Chat</a>
+          <a class="nav-link" data-nav href="/session">Session</a>
+        </nav>
+      </header>
+
+      <main class="auth-layout">
+        <section class="panel auth-copy">
+          <p class="eyebrow">Operator Access</p>
+          <h1>Separate the sign-in flow from the workspace itself.</h1>
+          <p class="body-copy">
+            This gateway handles registration and login, then forwards operators into the streaming chat or session
+            views without crowding the main interface.
+          </p>
+
+          <div class="info-stack">
+            <article class="mini-card">
+              <span class="metric-label">HTTP only</span>
+              <strong>No WebSocket dependency</strong>
+              <p>The browser consumes chunked responses using regular fetch streams.</p>
+            </article>
+            <article class="mini-card">
+              <span class="metric-label">Backend state</span>
+              <strong id="api-status-label">Checking API</strong>
+              <p id="api-status-note">Contacting the local API endpoint.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel auth-panel">
+          <div class="auth-card">
+            <div class="auth-card__tabs">
+              <button id="register-tab" class="tab-button tab-button--active" type="button">Register</button>
+              <button id="login-tab" class="tab-button" type="button">Login</button>
+            </div>
+
+            <form id="auth-form" class="stack-form">
+              <label class="field">
+                <span>Email</span>
+                <input id="auth-email" placeholder="operator@pwn.ai" autocomplete="username" />
+              </label>
+
+              <label class="field">
+                <span>Password</span>
+                <input id="auth-password" type="password" placeholder="Minimum 6 characters" autocomplete="current-password" />
+              </label>
+
+              <p id="auth-error" class="error-text" hidden></p>
+
+              <button id="auth-submit" class="primary-button" type="submit">Create operator</button>
+            </form>
+
+            <div id="continue-box" class="context-strip" hidden>
+              <div>
+                <span class="metric-label">Stored session</span>
+                <strong id="continue-email">Authenticated operator</strong>
+              </div>
+              <a class="ghost-button" href="/chat">Continue to chat</a>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/auth/auth.js"></script>
+  </body>
+</html>

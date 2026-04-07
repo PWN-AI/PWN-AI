@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PWN-AI Session</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="page-glow page-glow--left"></div>
+      <div class="page-glow page-glow--right"></div>
+
+      <header class="site-topbar">
+        <a class="brand-lockup" href="/">
+          <img class="brand-lockup__wordmark" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
+        </a>
+
+        <nav class="site-nav">
+          <a class="nav-link" data-nav href="/">Home</a>
+          <a class="nav-link" data-nav href="/auth">Auth</a>
+          <a class="nav-link" data-nav href="/chat">Chat</a>
+          <a class="nav-link nav-link--active" data-nav href="/session">Session</a>
+        </nav>
+
+        <div class="topbar-actions">
+          <span id="health-pill" class="badge badge--ghost">AI pending</span>
+          <span id="current-user" class="user-chip">Unauthenticated</span>
+          <button id="signout-button" class="ghost-button" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <main class="session-layout">
+        <section class="panel session-control-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Execution Surface</p>
+              <h1>Dedicated pentest session runner</h1>
+            </div>
+          </div>
+
+          <form id="session-form" class="stack-form">
+            <label class="field">
+              <span>Goal</span>
+              <textarea id="session-goal" rows="3" placeholder="Find SQL injection paths in the authenticated user flow."></textarea>
+            </label>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>Target URL</span>
+                <input id="session-target-url" placeholder="http://target.local" />
+              </label>
+
+              <label class="field">
+                <span>Request file</span>
+                <input id="session-target-file" placeholder="requests/login.txt" />
+              </label>
+
+              <label class="field">
+                <span>Login URL</span>
+                <input id="session-login-url" placeholder="http://target.local/login" />
+              </label>
+
+              <label class="field">
+                <span>Crawl depth</span>
+                <input id="session-crawl-depth" type="number" min="0" max="3" value="2" />
+              </label>
+
+              <label class="field">
+                <span>Username</span>
+                <input id="session-username" placeholder="admin" />
+              </label>
+
+              <label class="field">
+                <span>Password</span>
+                <input id="session-password" type="password" placeholder="password" />
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <label class="toggle">
+                <input id="session-auto-approve" type="checkbox" checked />
+                <span>Auto approve actions</span>
+              </label>
+
+              <label class="toggle">
+                <input id="session-print-final-state" type="checkbox" />
+                <span>Print final state</span>
+              </label>
+            </div>
+
+            <div class="composer__footer">
+              <p id="session-meta" class="helper-text">Streaming over POST /api/chat/session</p>
+              <button id="session-submit" class="primary-button" type="submit">Launch session</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel terminal-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Runtime Output</p>
+              <h2>Live terminal stream</h2>
+            </div>
+            <button id="clear-session" class="ghost-button" type="button">Clear log</button>
+          </div>
+
+          <pre id="terminal" class="terminal">Session output will stream here in real time.</pre>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/session/session.js"></script>
+  </body>
+</html>

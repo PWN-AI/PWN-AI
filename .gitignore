@@ -13,7 +13,6 @@ ai/rag/index/
 .env.*
 !.env.example
 node_modules/
-web/dist/
 
 tools/
 *.zip

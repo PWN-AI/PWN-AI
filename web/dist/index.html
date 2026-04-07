@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PWN-AI</title>
+    <meta
+      name="description"
+      content="PWN-AI offensive security workspace with HTTP-streamed chat and pentest runtime control."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="page-glow page-glow--left"></div>
+      <div class="page-glow page-glow--right"></div>
+
+      <header class="site-topbar">
+        <a class="brand-lockup" href="/">
+          <img class="brand-lockup__wordmark" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
+        </a>
+
+        <nav class="site-nav">
+          <a class="nav-link nav-link--active" data-nav href="/">Home</a>
+          <a class="nav-link" data-nav href="/auth">Auth</a>
+          <a class="nav-link" data-nav href="/chat">Chat</a>
+          <a class="nav-link" data-nav href="/session">Session</a>
+        </nav>
+      </header>
+
+      <main class="landing-layout">
+        <section class="panel landing-hero">
+          <div class="landing-hero__copy">
+            <p class="eyebrow">Offensive AI Workspace</p>
+            <h1>Separate surfaces for entry, collaboration, and live pentest execution.</h1>
+            <p class="body-copy">
+              PWN-AI now streams responses over ordinary HTTP, character by character, so operators can watch output
+              arrive live without WebSockets.
+            </p>
+
+            <div class="action-row">
+              <a class="primary-button" href="/auth">Enter Auth Gateway</a>
+              <a class="ghost-button" href="/chat">Open Chat Surface</a>
+            </div>
+          </div>
+
+          <div class="landing-hero__visual">
+            <div class="hero-mark">
+              <img src="/assets/pwn-ai-icon.png" alt="PWN-AI icon" />
+            </div>
+            <div class="hero-stack">
+              <article class="mini-card">
+                <span class="metric-label">Transport</span>
+                <strong>Chunked HTTP streaming</strong>
+                <p>Incremental assistant and runtime output with normal fetch.</p>
+              </article>
+              <article class="mini-card">
+                <span class="metric-label">Control</span>
+                <strong>Chat and session split</strong>
+                <p>Operators no longer have to work from a single compressed screen.</p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section-grid">
+          <article class="panel feature-card">
+            <p class="eyebrow">01</p>
+            <h2>Landing</h2>
+            <p>Brand-forward entry point with clear routing into authentication and work surfaces.</p>
+          </article>
+
+          <article class="panel feature-card">
+            <p class="eyebrow">02</p>
+            <h2>Chat</h2>
+            <p>Dedicated assistant workspace with live streamed answers and quick prompting.</p>
+          </article>
+
+          <article class="panel feature-card">
+            <p class="eyebrow">03</p>
+            <h2>Session</h2>
+            <p>Separate execution console for long-running pentest runs and terminal-style logs.</p>
+          </article>
+        </section>
+
+        <section class="panel workflow-panel">
+          <div>
+            <p class="eyebrow">Workflow</p>
+            <h2>Intended path</h2>
+          </div>
+
+          <div class="workflow-grid">
+            <div class="workflow-step">
+              <span>1</span>
+              <strong>Authenticate</strong>
+              <p>Create or reuse an operator account from the auth page.</p>
+            </div>
+            <div class="workflow-step">
+              <span>2</span>
+              <strong>Plan in chat</strong>
+              <p>Use the streaming assistant surface to refine prompts and attack plans.</p>
+            </div>
+            <div class="workflow-step">
+              <span>3</span>
+              <strong>Launch session</strong>
+              <p>Move to the dedicated session page for long-running execution output.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

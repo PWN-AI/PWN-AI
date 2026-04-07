@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PWN-AI Chat</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="page-glow page-glow--left"></div>
+      <div class="page-glow page-glow--right"></div>
+
+      <header class="site-topbar">
+        <a class="brand-lockup" href="/">
+          <img class="brand-lockup__wordmark" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
+        </a>
+
+        <nav class="site-nav">
+          <a class="nav-link" data-nav href="/">Home</a>
+          <a class="nav-link" data-nav href="/auth">Auth</a>
+          <a class="nav-link nav-link--active" data-nav href="/chat">Chat</a>
+          <a class="nav-link" data-nav href="/session">Session</a>
+        </nav>
+
+        <div class="topbar-actions">
+          <span id="health-pill" class="badge badge--ghost">AI pending</span>
+          <span id="current-user" class="user-chip">Unauthenticated</span>
+          <button id="signout-button" class="ghost-button" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <main class="workspace-layout">
+        <aside class="panel sidebar-panel">
+          <div class="panel-heading">
+            <p class="eyebrow">Chat Surface</p>
+            <h1>Live assistant workspace</h1>
+          </div>
+
+          <div class="info-stack">
+            <article class="mini-card">
+              <span class="metric-label">Status</span>
+              <strong id="chat-status">Loading authenticated context.</strong>
+              <p id="chat-status-note">Fetching user, model, and health data.</p>
+            </article>
+            <article class="mini-card">
+              <span class="metric-label">Head model</span>
+              <strong id="head-model">Unavailable</strong>
+              <p id="head-model-note">Resolved from the Python model config.</p>
+            </article>
+            <article class="mini-card">
+              <span class="metric-label">Implementor model</span>
+              <strong id="implementor-model">Unavailable</strong>
+              <p id="implementor-model-note">Used for coding and execution tasks.</p>
+            </article>
+          </div>
+
+          <div class="quick-actions quick-actions--stack">
+            <button class="chip prompt-chip" type="button" data-prompt="Summarize the current attack surface before choosing tools.">
+              Summarize the current attack surface before choosing tools.
+            </button>
+            <button class="chip prompt-chip" type="button" data-prompt="Explain how you would test an authenticated workflow safely.">
+              Explain how you would test an authenticated workflow safely.
+            </button>
+            <button class="chip prompt-chip" type="button" data-prompt="Generate a tight reconnaissance plan for a staging target.">
+              Generate a tight reconnaissance plan for a staging target.
+            </button>
+          </div>
+
+          <a class="ghost-button ghost-button--wide" href="/session">Move to pentest session</a>
+        </aside>
+
+        <section class="panel transcript-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Conversation</p>
+              <h2>Assistant transcript</h2>
+            </div>
+            <button id="clear-chat" class="ghost-button" type="button">Clear transcript</button>
+          </div>
+
+          <div id="transcript" class="transcript">
+            <div class="empty-state">
+              <span class="badge badge--ghost">Ready</span>
+              <h3>Start a streamed conversation</h3>
+              <p>The backend emits the assistant response incrementally over normal HTTP.</p>
+            </div>
+          </div>
+
+          <form id="chat-form" class="composer">
+            <textarea id="chat-input" rows="5" placeholder="Ask the assistant to plan, analyze, or explain."></textarea>
+            <div class="composer__footer">
+              <p id="chat-meta" class="helper-text">Streaming over POST /api/chat/completions</p>
+              <button id="chat-submit" class="primary-button" type="submit">Send message</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/chat/chat.js"></script>
+  </body>
+</html>
