@@ -1,0 +1,44 @@
+
+> pwn-ai-api@1.0.0 dev
+> ts-node-dev --respawn --transpile-only src/index.ts
+
+[INFO] 18:56:37 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+[AI Service] Using Python: python
+
+╔═══════════════════════════════════════════════════════════╗
+║                     PWN-AI API Server                     ║
+╠═══════════════════════════════════════════════════════════╣
+║  Status:  Running                                         ║
+║  Port:    3000                                           ║
+║  Env:     development                                    ║
+║  Ollama:  http://localhost:11434                         ║
+╠═══════════════════════════════════════════════════════════╣
+║  Endpoints:                                               ║
+║    GET  /              - API info                         ║
+║    GET  /api/health    - Health check                     ║
+║    POST /api/auth/register - Register user                ║
+║    POST /api/auth/login    - Login                        ║
+║    POST /api/chat/completions - Chat with AI (auth)       ║
+║    GET  /api/chat/models - List models (auth)             ║
+╚═══════════════════════════════════════════════════════════╝
+  
+[INFO] 18:59:04 Restarting: C:\Users\yoyoa\Desktop\PWN-AI\api\src\services\ollama.service.ts has been modified
+[AI Service] Using Python: python
+
+╔═══════════════════════════════════════════════════════════╗
+║                     PWN-AI API Server                     ║
+╠═══════════════════════════════════════════════════════════╣
+║  Status:  Running                                         ║
+║  Port:    3000                                           ║
+║  Env:     development                                    ║
+║  Ollama:  http://localhost:11434                         ║
+╠═══════════════════════════════════════════════════════════╣
+║  Endpoints:                                               ║
+║    GET  /              - API info                         ║
+║    GET  /api/health    - Health check                     ║
+║    POST /api/auth/register - Register user                ║
+║    POST /api/auth/login    - Login                        ║
+║    POST /api/chat/completions - Chat with AI (auth)       ║
+║    GET  /api/chat/models - List models (auth)             ║
+╚═══════════════════════════════════════════════════════════╝
+  

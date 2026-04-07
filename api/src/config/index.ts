@@ -1,8 +1,12 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 
-// Load .env file from api directory
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+const rootEnvPath = path.resolve(__dirname, '../../../.env');
+const apiEnvPath = path.resolve(__dirname, '../../.env');
+const envPath = fs.existsSync(rootEnvPath) ? rootEnvPath : apiEnvPath;
+
+dotenv.config({ path: envPath });
 
 export const config = {
   // Server

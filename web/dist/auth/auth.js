@@ -1,6 +1,8 @@
-import { apiFetch, readStoredAuth, saveStoredAuth, setNavState } from "/common.js";
+import { apiFetch, hydratePublicChrome, initTheme, saveStoredAuth, setNavState, wireThemeToggle } from "/common.js";
 
+initTheme();
 setNavState("/auth");
+wireThemeToggle(document.getElementById("theme-toggle"));
 
 const state = {
   mode: "register",
@@ -9,13 +11,17 @@ const state = {
 const elements = {
   registerTab: document.getElementById("register-tab"),
   loginTab: document.getElementById("login-tab"),
-  form: document.getElementById("auth-form"),
-  email: document.getElementById("auth-email"),
-  password: document.getElementById("auth-password"),
-  submit: document.getElementById("auth-submit"),
-  error: document.getElementById("auth-error"),
-  continueBox: document.getElementById("continue-box"),
-  continueEmail: document.getElementById("continue-email"),
+  title: document.getElementById("auth-title"),
+  registerForm: document.getElementById("register-form"),
+  registerEmail: document.getElementById("register-email"),
+  registerPassword: document.getElementById("register-password"),
+  registerSubmit: document.getElementById("register-submit"),
+  registerError: document.getElementById("register-error"),
+  loginForm: document.getElementById("login-form"),
+  loginEmail: document.getElementById("login-email"),
+  loginPassword: document.getElementById("login-password"),
+  loginSubmit: document.getElementById("login-submit"),
+  loginError: document.getElementById("login-error"),
   apiStatusLabel: document.getElementById("api-status-label"),
   apiStatusNote: document.getElementById("api-status-note"),
 };
@@ -24,49 +30,75 @@ const setMode = (mode) => {
   state.mode = mode;
   elements.registerTab.classList.toggle("tab-button--active", mode === "register");
   elements.loginTab.classList.toggle("tab-button--active", mode === "login");
-  elements.submit.textContent = mode === "register" ? "Create operator" : "Enter workspace";
-  elements.error.hidden = true;
+  elements.title.textContent = mode === "register" ? "Create account" : "Welcome back";
+  elements.registerForm.hidden = mode !== "register";
+  elements.loginForm.hidden = mode !== "login";
 };
 
-const showError = (message = "") => {
-  elements.error.hidden = !message;
-  elements.error.textContent = message;
+const showError = (mode, message = "") => {
+  const el = mode === "register" ? elements.registerError : elements.loginError;
+  el.hidden = !message;
+  el.textContent = message;
 };
 
 elements.registerTab.addEventListener("click", () => setMode("register"));
 elements.loginTab.addEventListener("click", () => setMode("login"));
 
-elements.form.addEventListener("submit", async (event) => {
+elements.registerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  showError("");
-  elements.submit.disabled = true;
+  showError("register", "");
+  elements.registerSubmit.disabled = true;
 
   try {
-    const endpoint = state.mode === "register" ? "/api/auth/register" : "/api/auth/login";
-    const payload = await apiFetch(endpoint, {
+    const payload = await apiFetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        email: elements.email.value,
-        password: elements.password.value,
+        email: elements.registerEmail.value,
+        password: elements.registerPassword.value,
       }),
     });
 
     saveStoredAuth(payload.token, payload.user);
     window.location.href = "/chat";
   } catch (error) {
-    showError(error.message || "Authentication failed.");
+    showError("register", error.message || "Registration failed.");
   } finally {
-    elements.submit.disabled = false;
+    elements.registerSubmit.disabled = false;
+  }
+});
+
+elements.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showError("login", "");
+  elements.loginSubmit.disabled = true;
+
+  try {
+    const payload = await apiFetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: elements.loginEmail.value,
+        password: elements.loginPassword.value,
+      }),
+    });
+
+    saveStoredAuth(payload.token, payload.user);
+    window.location.href = "/chat";
+  } catch (error) {
+    showError("login", error.message || "Sign in failed.");
+  } finally {
+    elements.loginSubmit.disabled = false;
   }
 });
 
 const bootstrap = async () => {
-  const storedAuth = readStoredAuth();
-  if (storedAuth?.user?.email) {
-    elements.continueBox.hidden = false;
-    elements.continueEmail.textContent = storedAuth.user.email;
-    elements.email.value = storedAuth.user.email;
+  const auth = await hydratePublicChrome({
+    redirectIfAuthed: true,
+    redirectTarget: "/chat",
+  });
+  if (auth?.redirected) {
+    return;
   }
 
   try {
@@ -78,5 +110,7 @@ const bootstrap = async () => {
     elements.apiStatusNote.textContent = error.message || "The local API did not respond.";
   }
 };
+
+bootstrap();
 
 bootstrap();

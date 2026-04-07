@@ -21,9 +21,14 @@ export interface ChatResponse {
 }
 export interface OllamaModel {
     name: string;
-    size: number;
-    digest: string;
-    modified_at: string;
+    role: string;
+    provider: string;
+}
+export interface ProviderConfig {
+    activeProvider: string;
+    fallbackProvider: string;
+    availableProviders: string[];
+    roles: Record<string, string>;
 }
 export interface AuthPayload {
     userId: string;

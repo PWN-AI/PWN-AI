@@ -6,8 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.config = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
-// Load .env file from api directory
-dotenv_1.default.config({ path: path_1.default.join(__dirname, '../../.env') });
+const fs_1 = __importDefault(require("fs"));
+const rootEnvPath = path_1.default.resolve(__dirname, '../../../.env');
+const apiEnvPath = path_1.default.resolve(__dirname, '../../.env');
+const envPath = fs_1.default.existsSync(rootEnvPath) ? rootEnvPath : apiEnvPath;
+dotenv_1.default.config({ path: envPath });
 exports.config = {
     // Server
     port: parseInt(process.env.PORT || '3000', 10),

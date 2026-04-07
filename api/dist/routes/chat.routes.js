@@ -15,6 +15,10 @@ router.post('/completions', chat_controller_1.default.completions);
 router.post('/session', chat_controller_1.default.runSession);
 // GET /api/chat/models - List available models from AI config
 router.get('/models', chat_controller_1.default.listModels);
+// GET /api/chat/provider - Read active provider config
+router.get('/provider', chat_controller_1.default.getProvider);
+// PUT /api/chat/provider - Update active provider config
+router.put('/provider', chat_controller_1.default.updateProvider);
 // GET /api/chat/health - Check AI system connection
 router.get('/health', chat_controller_1.default.health);
 exports.default = router;

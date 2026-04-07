@@ -255,6 +255,36 @@ export const chatController = {
     }
   },
 
+  async getProvider(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const provider = await aiService.getProviderConfig();
+      res.json(provider);
+    } catch (error: any) {
+      next(error);
+    }
+  },
+
+  async updateProvider(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { provider } = req.body;
+
+      if (!provider || typeof provider !== 'string') {
+        res.status(400).json({ error: 'provider is required' });
+        return;
+      }
+
+      const nextProvider = await aiService.setProvider(provider);
+      res.json(nextProvider);
+    } catch (error: any) {
+      if (error.message.includes('Unsupported provider')) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+
+      next(error);
+    }
+  },
+
   async health(req: Request, res: Response): Promise<void> {
     const aiAvailable = await aiService.isAvailable();
     res.json({

@@ -1,4 +1,4 @@
-import { ChatMessage, ChatResponse, OllamaModel, SessionParams } from '../types';
+import { ChatMessage, ChatResponse, OllamaModel, ProviderConfig, SessionParams } from '../types';
 interface StreamCallbacks {
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
@@ -10,9 +10,13 @@ interface StreamOperation<T> {
 declare class AIService {
     private projectRoot;
     private pythonPath;
+    private modelConfigPath;
     constructor();
     private resolvePythonPath;
     private createStreamCancelledError;
+    private readModelConfigFile;
+    private extractFallbackProvider;
+    private extractAvailableProviders;
     private buildSessionArgs;
     private buildChatPythonScript;
     private createOperation;
@@ -38,6 +42,8 @@ declare class AIService {
      * List available models from the AI config
      */
     listModels(): Promise<OllamaModel[]>;
+    getProviderConfig(): Promise<ProviderConfig>;
+    setProvider(provider: string): Promise<ProviderConfig>;
     /**
      * Check if the AI system is available
      */

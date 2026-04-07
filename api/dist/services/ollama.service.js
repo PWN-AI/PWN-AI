@@ -13,6 +13,7 @@ class AIService {
     constructor() {
         // PWN-AI project root (parent of api/)
         this.projectRoot = path_1.default.resolve(__dirname, '../../../');
+        this.modelConfigPath = path_1.default.join(this.projectRoot, 'ai/config/models.local.yaml');
         // Resolve Python path - try .venv first, then configured path, then fallback to 'python'
         this.pythonPath = this.resolvePythonPath();
         console.log(`[AI Service] Using Python: ${this.pythonPath}`);
@@ -50,6 +51,20 @@ class AIService {
         const error = new Error(message);
         error.code = 'STREAM_CANCELLED';
         return error;
+    }
+    readModelConfigFile() {
+        return fs_1.default.readFileSync(this.modelConfigPath, 'utf8');
+    }
+    extractFallbackProvider(configContent) {
+        const match = configContent.match(/^(\s*mode:\s*["']?)([^"'\r\n]+)(["']?.*)$/m);
+        return match?.[2]?.trim() || 'local';
+    }
+    extractAvailableProviders(configContent) {
+        const providersSectionMatch = configContent.match(/^\s{2}providers:\s*\r?\n([\s\S]*?)(?=^\S|\r?\nmodels:)/m);
+        if (!providersSectionMatch) {
+            return [];
+        }
+        return Array.from(providersSectionMatch[1].matchAll(/^\s{4}([a-zA-Z0-9_-]+):\s*$/gm)).map((match) => match[1]);
     }
     buildSessionArgs(params) {
         const args = ['-u', 'main.py'];
@@ -345,6 +360,29 @@ print(json.dumps(result))
             });
         });
     }
+    async getProviderConfig() {
+        const configContent = this.readModelConfigFile();
+        const models = await this.listModels();
+        const roles = Object.fromEntries(models.map((model) => [model.role, model.provider]));
+        const providers = Array.from(new Set(models.map((model) => model.provider)));
+        return {
+            activeProvider: providers.length === 1 ? providers[0] : 'mixed',
+            fallbackProvider: this.extractFallbackProvider(configContent),
+            availableProviders: this.extractAvailableProviders(configContent),
+            roles,
+        };
+    }
+    async setProvider(provider) {
+        const currentConfig = await this.getProviderConfig();
+        if (!currentConfig.availableProviders.includes(provider)) {
+            throw new Error(`Unsupported provider "${provider}"`);
+        }
+        let nextContent = this.readModelConfigFile();
+        nextContent = nextContent.replace(/^(\s*mode:\s*["']?)([^"'\r\n]+)(["']?.*)$/m, `$1${provider}$3`);
+        nextContent = nextContent.replace(/^(\s+provider:\s*["']?)([^"'\r\n]+)(["']?.*)$/gm, `$1${provider}$3`);
+        fs_1.default.writeFileSync(this.modelConfigPath, nextContent, 'utf8');
+        return this.getProviderConfig();
+    }
     /**
      * Check if the AI system is available
      */
@@ -365,23 +403,39 @@ base_url = str(conn.get("base_url", "")).rstrip("/")
 if not base_url:
     raise RuntimeError("Missing Ollama base URL")
 
-response = requests.get(f"{base_url}/api/tags", headers=conn.get("headers", {}), timeout=5)
+response = requests.get(f"{base_url}/api/version", headers=conn.get("headers", {}), timeout=15)
 response.raise_for_status()
 print("ok")
 `;
             const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', pythonCode], {
                 cwd: this.projectRoot,
+                env: { ...process.env },
             });
+            let settled = false;
+            const timeout = setTimeout(() => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                proc.kill();
+                resolve(false);
+            }, 20000);
             proc.on('close', (code) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timeout);
                 resolve(code === 0);
             });
             proc.on('error', () => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timeout);
                 resolve(false);
             });
-            setTimeout(() => {
-                proc.kill();
-                resolve(false);
-            }, 5000);
         });
     }
 }

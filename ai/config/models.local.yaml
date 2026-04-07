@@ -1,6 +1,6 @@
 ollama:
   # Fallback provider if a model role omits `provider`.
-  mode: "local"
+  mode: "cloud"
 
   providers:
     # Local Ollama server
@@ -19,21 +19,21 @@ ollama:
 models:
   head:
     # Choose per-role provider: local | cloud
-    provider: "local"
-    model: "llama3.1:latest" 
+    provider: "cloud"
+    model: "kimi-k2.5" 
     temperature: 0.2 #original 0.2
     # change the reasoning to true/false for wanted models (especially qwen and deepseek)
     reasoning: false 
     num_ctx: 32768 #32768
   implementor:
-    provider: "local"
-    model: "qwen2.5-coder:7b"
+    provider: "cloud"
+    model: "kimi-k2.5"
     temperature: 0.1
     reasoning: false
     num_ctx: 32768 #32768
   embedding:
-    provider: "local"
-    model: "nomic-embed-text"
+    provider: "cloud"
+    model: "kimi-k2.5"
 
 
 runtime:

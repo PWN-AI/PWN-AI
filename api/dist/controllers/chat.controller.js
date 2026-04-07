@@ -214,6 +214,33 @@ exports.chatController = {
             next(error);
         }
     },
+    async getProvider(req, res, next) {
+        try {
+            const provider = await ollama_service_1.default.getProviderConfig();
+            res.json(provider);
+        }
+        catch (error) {
+            next(error);
+        }
+    },
+    async updateProvider(req, res, next) {
+        try {
+            const { provider } = req.body;
+            if (!provider || typeof provider !== 'string') {
+                res.status(400).json({ error: 'provider is required' });
+                return;
+            }
+            const nextProvider = await ollama_service_1.default.setProvider(provider);
+            res.json(nextProvider);
+        }
+        catch (error) {
+            if (error.message.includes('Unsupported provider')) {
+                res.status(400).json({ error: error.message });
+                return;
+            }
+            next(error);
+        }
+    },
     async health(req, res) {
         const aiAvailable = await ollama_service_1.default.isAvailable();
         res.json({

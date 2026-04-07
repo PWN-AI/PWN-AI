@@ -9,6 +9,8 @@ export declare const chatController: {
      */
     runSession(req: Request, res: Response, next: NextFunction): Promise<void>;
     listModels(req: Request, res: Response, next: NextFunction): Promise<void>;
+    getProvider(req: Request, res: Response, next: NextFunction): Promise<void>;
+    updateProvider(req: Request, res: Response, next: NextFunction): Promise<void>;
     health(req: Request, res: Response): Promise<void>;
 };
 export default chatController;

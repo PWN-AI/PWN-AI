@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PWN-AI Session</title>
+    <title>PWN-AI · Session</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem("pwn-ai-theme");
+        const theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -13,36 +26,48 @@
 
       <header class="site-topbar">
         <a class="brand-lockup" href="/">
-          <img class="brand-lockup__wordmark" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
+          <img class="brand-lockup__wordmark brand-lockup__wordmark--compact" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
         </a>
 
-        <nav class="site-nav">
-          <a class="nav-link" data-nav href="/">Home</a>
-          <a class="nav-link" data-nav href="/auth">Auth</a>
-          <a class="nav-link" data-nav href="/chat">Chat</a>
-          <a class="nav-link nav-link--active" data-nav href="/session">Session</a>
-        </nav>
+        <div class="site-topbar__actions">
+          <nav class="site-nav">
+            <a class="nav-link" data-nav href="/">Home</a>
+            <a class="nav-link" data-nav data-auth-nav href="/auth">Sign in</a>
+            <a class="nav-link" data-nav href="/chat">Chat</a>
+            <a class="nav-link nav-link--active" data-nav href="/session">Session</a>
+          </nav>
 
-        <div class="topbar-actions">
-          <span id="health-pill" class="badge badge--ghost">AI pending</span>
-          <span id="current-user" class="user-chip">Unauthenticated</span>
-          <button id="signout-button" class="ghost-button" type="button">Sign out</button>
+          <div class="topbar-actions">
+            <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle theme"></button>
+            <span id="health-pill" class="badge badge--ghost">Pending</span>
+            <span id="current-user" class="user-chip">Unauthenticated</span>
+            <button id="signout-button" class="ghost-button" type="button">Sign out</button>
+          </div>
         </div>
       </header>
 
-      <main class="session-layout">
-        <section class="panel session-control-panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Execution Surface</p>
-              <h1>Dedicated pentest session runner</h1>
-            </div>
+      <main class="session-layout session-layout--clean">
+        <section class="panel session-control-panel session-control-panel--clean">
+          <div class="panel-header" style="padding-left:0;padding-right:0;padding-top:0">
+            <h2>New session</h2>
           </div>
 
           <form id="session-form" class="stack-form">
+            <div class="meta-stack meta-stack--inline">
+              <div class="status-row">
+                <span class="metric-label">Provider</span>
+                <strong id="provider-mode">Loading</strong>
+              </div>
+              <p id="provider-note" class="helper-text">Checking configuration.</p>
+              <div class="provider-switch" role="group" aria-label="AI provider switch">
+                <button id="provider-local" class="provider-pill" type="button" data-provider="local">Local</button>
+                <button id="provider-cloud" class="provider-pill" type="button" data-provider="cloud">Cloud</button>
+              </div>
+            </div>
+
             <label class="field">
               <span>Goal</span>
-              <textarea id="session-goal" rows="3" placeholder="Find SQL injection paths in the authenticated user flow."></textarea>
+              <textarea id="session-goal" rows="2" placeholder="Describe what you want to test..."></textarea>
             </label>
 
             <div class="form-grid">
@@ -52,13 +77,13 @@
               </label>
 
               <label class="field">
-                <span>Request file</span>
-                <input id="session-target-file" placeholder="requests/login.txt" />
+                <span>Login URL</span>
+                <input id="session-login-url" placeholder="http://target.local/login" />
               </label>
 
               <label class="field">
-                <span>Login URL</span>
-                <input id="session-login-url" placeholder="http://target.local/login" />
+                <span>Request file</span>
+                <input id="session-target-file" placeholder="requests/login.txt" />
               </label>
 
               <label class="field">
@@ -78,34 +103,31 @@
             </div>
 
             <div class="toggle-row">
-              <label class="toggle">
+              <label class="toggle toggle--clean">
                 <input id="session-auto-approve" type="checkbox" checked />
-                <span>Auto approve actions</span>
+                <span>Auto approve</span>
               </label>
 
-              <label class="toggle">
+              <label class="toggle toggle--clean">
                 <input id="session-print-final-state" type="checkbox" />
                 <span>Print final state</span>
               </label>
             </div>
 
             <div class="composer__footer">
-              <p id="session-meta" class="helper-text">Streaming over POST /api/chat/session</p>
-              <button id="session-submit" class="primary-button" type="submit">Launch session</button>
+              <p id="session-meta" class="helper-text">Streaming via POST /api/chat/session</p>
+              <button id="session-submit" class="primary-button" type="submit">Launch</button>
             </div>
           </form>
         </section>
 
-        <section class="panel terminal-panel">
+        <section class="panel terminal-panel terminal-panel--clean">
           <div class="panel-header">
-            <div>
-              <p class="eyebrow">Runtime Output</p>
-              <h2>Live terminal stream</h2>
-            </div>
-            <button id="clear-session" class="ghost-button" type="button">Clear log</button>
+            <h2>Output</h2>
+            <button id="clear-session" class="ghost-button" type="button">Clear</button>
           </div>
 
-          <pre id="terminal" class="terminal">Session output will stream here in real time.</pre>
+          <pre id="terminal" class="terminal">Session output will appear here.</pre>
         </section>
       </main>
     </div>
