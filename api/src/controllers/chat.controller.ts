@@ -2,13 +2,30 @@ import { Request, Response, NextFunction } from 'express';
 import aiService from '../services/ollama.service';
 import { ChatMessage, SessionParams } from '../types';
 
+const isStreamRequest = (value: unknown): boolean => value === true || value === 'true';
+
+const setStreamHeaders = (res: Response): void => {
+  res.status(200);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+};
+
+const writeCharacters = (res: Response, chunk: string): void => {
+  for (const character of chunk) {
+    res.write(character);
+  }
+};
+
 export const chatController = {
   /**
    * Chat completions - sends messages to the Python AI
    */
   async completions(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { messages, model } = req.body;
+      const { messages, model, stream } = req.body;
 
       if (!messages || !Array.isArray(messages) || messages.length === 0) {
         res.status(400).json({ error: 'Messages array is required and cannot be empty' });
@@ -27,8 +44,52 @@ export const chatController = {
         }
       }
 
+      const aiAvailable = await aiService.isAvailable();
+      if (!aiAvailable) {
+        res.status(503).json({ error: 'AI service unavailable. Start Ollama and verify the Python dependencies.' });
+        return;
+      }
+
+      if (isStreamRequest(stream)) {
+        setStreamHeaders(res);
+
+        const operation = aiService.streamChat(messages as ChatMessage[], model, {
+          onStdout: (chunk) => {
+            if (!res.writableEnded) {
+              writeCharacters(res, chunk);
+            }
+          },
+        });
+
+        const cancelStream = () => {
+          operation.cancel();
+        };
+
+        req.on('close', cancelStream);
+
+        try {
+          await operation.promise;
+          if (!res.writableEnded) {
+            res.end();
+          }
+        } catch (error: any) {
+          if (error?.code === 'STREAM_CANCELLED') {
+            return;
+          }
+
+          if (!res.writableEnded) {
+            writeCharacters(res, `\n\n[stream error] ${error.message}`);
+            res.end();
+          }
+        } finally {
+          req.off('close', cancelStream);
+        }
+
+        return;
+      }
+
       const response = await aiService.chat(messages as ChatMessage[], model);
-      
+
       res.json({
         id: response.id,
         model: response.model,
@@ -76,6 +137,7 @@ export const chatController = {
         maxTasks,
         maxReplans,
         maxNewTasksPerReplan,
+        stream,
       } = req.body;
 
       // Validation
@@ -96,6 +158,12 @@ export const chatController = {
 
       if (crawlDepth !== undefined && (crawlDepth < 0 || crawlDepth > 3)) {
         res.status(400).json({ error: 'crawlDepth must be between 0 and 3' });
+        return;
+      }
+
+      const aiAvailable = await aiService.isAvailable();
+      if (!aiAvailable) {
+        res.status(503).json({ error: 'AI service unavailable. Start Ollama and verify the Python dependencies.' });
         return;
       }
 
@@ -122,6 +190,49 @@ export const chatController = {
         maxReplans,
         maxNewTasksPerReplan,
       };
+
+      if (isStreamRequest(stream)) {
+        setStreamHeaders(res);
+
+        const operation = aiService.streamSession(params, {
+          onStdout: (chunk) => {
+            if (!res.writableEnded) {
+              writeCharacters(res, chunk);
+            }
+          },
+          onStderr: (chunk) => {
+            if (!res.writableEnded) {
+              writeCharacters(res, chunk);
+            }
+          },
+        });
+
+        const cancelStream = () => {
+          operation.cancel();
+        };
+
+        req.on('close', cancelStream);
+
+        try {
+          await operation.promise;
+          if (!res.writableEnded) {
+            res.end();
+          }
+        } catch (error: any) {
+          if (error?.code === 'STREAM_CANCELLED') {
+            return;
+          }
+
+          if (!res.writableEnded) {
+            writeCharacters(res, `\n\n[stream error] ${error.message}`);
+            res.end();
+          }
+        } finally {
+          req.off('close', cancelStream);
+        }
+
+        return;
+      }
 
       const result = await aiService.runSession(params);
 

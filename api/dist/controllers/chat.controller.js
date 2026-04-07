@@ -5,13 +5,27 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.chatController = void 0;
 const ollama_service_1 = __importDefault(require("../services/ollama.service"));
+const isStreamRequest = (value) => value === true || value === 'true';
+const setStreamHeaders = (res) => {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+};
+const writeCharacters = (res, chunk) => {
+    for (const character of chunk) {
+        res.write(character);
+    }
+};
 exports.chatController = {
     /**
      * Chat completions - sends messages to the Python AI
      */
     async completions(req, res, next) {
         try {
-            const { messages, model } = req.body;
+            const { messages, model, stream } = req.body;
             if (!messages || !Array.isArray(messages) || messages.length === 0) {
                 res.status(400).json({ error: 'Messages array is required and cannot be empty' });
                 return;
@@ -26,6 +40,44 @@ exports.chatController = {
                     res.status(400).json({ error: 'Invalid role. Must be: user, assistant, or system' });
                     return;
                 }
+            }
+            const aiAvailable = await ollama_service_1.default.isAvailable();
+            if (!aiAvailable) {
+                res.status(503).json({ error: 'AI service unavailable. Start Ollama and verify the Python dependencies.' });
+                return;
+            }
+            if (isStreamRequest(stream)) {
+                setStreamHeaders(res);
+                const operation = ollama_service_1.default.streamChat(messages, model, {
+                    onStdout: (chunk) => {
+                        if (!res.writableEnded) {
+                            writeCharacters(res, chunk);
+                        }
+                    },
+                });
+                const cancelStream = () => {
+                    operation.cancel();
+                };
+                req.on('close', cancelStream);
+                try {
+                    await operation.promise;
+                    if (!res.writableEnded) {
+                        res.end();
+                    }
+                }
+                catch (error) {
+                    if (error?.code === 'STREAM_CANCELLED') {
+                        return;
+                    }
+                    if (!res.writableEnded) {
+                        writeCharacters(res, `\n\n[stream error] ${error.message}`);
+                        res.end();
+                    }
+                }
+                finally {
+                    req.off('close', cancelStream);
+                }
+                return;
             }
             const response = await ollama_service_1.default.chat(messages, model);
             res.json({
@@ -58,7 +110,7 @@ exports.chatController = {
             // Crawling
             crawlDepth, 
             // Runtime
-            config, outputDir, autoApprove, printFinalState, maxTasks, maxReplans, maxNewTasksPerReplan, } = req.body;
+            config, outputDir, autoApprove, printFinalState, maxTasks, maxReplans, maxNewTasksPerReplan, stream, } = req.body;
             // Validation
             if (!goal) {
                 res.status(400).json({ error: 'goal is required' });
@@ -74,6 +126,11 @@ exports.chatController = {
             }
             if (crawlDepth !== undefined && (crawlDepth < 0 || crawlDepth > 3)) {
                 res.status(400).json({ error: 'crawlDepth must be between 0 and 3' });
+                return;
+            }
+            const aiAvailable = await ollama_service_1.default.isAvailable();
+            if (!aiAvailable) {
+                res.status(503).json({ error: 'AI service unavailable. Start Ollama and verify the Python dependencies.' });
                 return;
             }
             const params = {
@@ -99,6 +156,44 @@ exports.chatController = {
                 maxReplans,
                 maxNewTasksPerReplan,
             };
+            if (isStreamRequest(stream)) {
+                setStreamHeaders(res);
+                const operation = ollama_service_1.default.streamSession(params, {
+                    onStdout: (chunk) => {
+                        if (!res.writableEnded) {
+                            writeCharacters(res, chunk);
+                        }
+                    },
+                    onStderr: (chunk) => {
+                        if (!res.writableEnded) {
+                            writeCharacters(res, chunk);
+                        }
+                    },
+                });
+                const cancelStream = () => {
+                    operation.cancel();
+                };
+                req.on('close', cancelStream);
+                try {
+                    await operation.promise;
+                    if (!res.writableEnded) {
+                        res.end();
+                    }
+                }
+                catch (error) {
+                    if (error?.code === 'STREAM_CANCELLED') {
+                        return;
+                    }
+                    if (!res.writableEnded) {
+                        writeCharacters(res, `\n\n[stream error] ${error.message}`);
+                        res.end();
+                    }
+                }
+                finally {
+                    req.off('close', cancelStream);
+                }
+                return;
+            }
             const result = await ollama_service_1.default.runSession(params);
             res.json({
                 sessionId: result.sessionId,

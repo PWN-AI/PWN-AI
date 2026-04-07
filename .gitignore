@@ -12,6 +12,8 @@ ai/rag/index/
 .env
 .env.*
 !.env.example
+node_modules/
+web/dist/
 
 tools/
 *.zip

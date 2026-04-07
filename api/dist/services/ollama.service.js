@@ -46,108 +46,217 @@ class AIService {
         // Fallback to system python
         return 'python';
     }
+    createStreamCancelledError(message = 'Stream cancelled by client') {
+        const error = new Error(message);
+        error.code = 'STREAM_CANCELLED';
+        return error;
+    }
+    buildSessionArgs(params) {
+        const args = ['-u', 'main.py'];
+        args.push('--goal', params.goal);
+        if (params.targetUrl) {
+            args.push('--target-url', params.targetUrl);
+        }
+        if (params.targetRequestFile) {
+            args.push('--target-request-file', params.targetRequestFile);
+        }
+        if (params.username) {
+            args.push('--username', params.username);
+        }
+        if (params.password) {
+            args.push('--password', params.password);
+        }
+        if (params.loginUrl) {
+            args.push('--login-url', params.loginUrl);
+        }
+        if (params.usernameField) {
+            args.push('--username-field', params.usernameField);
+        }
+        if (params.passwordField) {
+            args.push('--password-field', params.passwordField);
+        }
+        if (params.submitField) {
+            args.push('--submit-field', params.submitField);
+        }
+        if (params.submitValue) {
+            args.push('--submit-value', params.submitValue);
+        }
+        if (params.extraFormFields) {
+            args.push('--extra-form-fields', JSON.stringify(params.extraFormFields));
+        }
+        if (params.authTimeout !== undefined) {
+            args.push('--auth-timeout', params.authTimeout.toString());
+        }
+        if (params.insecureTls) {
+            args.push('--insecure-tls');
+        }
+        if (params.crawlDepth !== undefined) {
+            args.push('--crawl-depth', params.crawlDepth.toString());
+        }
+        if (params.config) {
+            args.push('--config', params.config);
+        }
+        if (params.outputDir) {
+            args.push('--output-dir', params.outputDir);
+        }
+        if (params.autoApprove) {
+            args.push('--auto-approve');
+        }
+        if (params.printFinalState) {
+            args.push('--print-final-state');
+        }
+        if (params.maxTasks !== undefined) {
+            args.push('--max-tasks', params.maxTasks.toString());
+        }
+        if (params.maxReplans !== undefined) {
+            args.push('--max-replans', params.maxReplans.toString());
+        }
+        if (params.maxNewTasksPerReplan !== undefined) {
+            args.push('--max-new-tasks-per-replan', params.maxNewTasksPerReplan.toString());
+        }
+        return args;
+    }
+    buildChatPythonScript() {
+        return `
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, ".")
+
+from ai.llm.ollama_client import build_ollama_clients
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+messages = json.loads(sys.stdin.read() or "[]")
+config_path = Path("ai/config/models.local.yaml")
+head_llm, _impl_llm, _cfg = build_ollama_clients(config_path)
+
+lc_messages = []
+for msg in messages:
+    role = msg.get("role")
+    content = msg.get("content", "")
+    if role == "system":
+        lc_messages.append(SystemMessage(content=content))
+    elif role == "assistant":
+        lc_messages.append(AIMessage(content=content))
+    else:
+        lc_messages.append(HumanMessage(content=content))
+
+for chunk in head_llm.stream(lc_messages):
+    token = ""
+    if hasattr(chunk, "content"):
+        token = chunk.content or ""
+    elif isinstance(chunk, str):
+        token = chunk
+    if token:
+        sys.stdout.write(token)
+        sys.stdout.flush()
+`;
+    }
+    createOperation(options) {
+        const proc = (0, child_process_1.spawn)(this.pythonPath, options.args, {
+            cwd: this.projectRoot,
+            env: { ...process.env },
+        });
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        let timeout;
+        let resolvePromise;
+        let rejectPromise;
+        const cleanup = () => {
+            if (timeout) {
+                clearTimeout(timeout);
+                timeout = undefined;
+            }
+        };
+        const safeResolve = (value) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            resolvePromise(value);
+        };
+        const safeReject = (error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            rejectPromise(error);
+        };
+        const promise = new Promise((resolve, reject) => {
+            resolvePromise = resolve;
+            rejectPromise = reject;
+            proc.stdout?.on('data', (data) => {
+                const chunk = data.toString();
+                stdout += chunk;
+                options.callbacks?.onStdout?.(chunk);
+            });
+            proc.stderr?.on('data', (data) => {
+                const chunk = data.toString();
+                stderr += chunk;
+                options.callbacks?.onStderr?.(chunk);
+            });
+            proc.on('close', (code) => {
+                if (settled) {
+                    return;
+                }
+                if (code !== 0) {
+                    safeReject(new Error(`${options.exitErrorLabel}: ${stderr || stdout}`));
+                    return;
+                }
+                try {
+                    safeResolve(options.resolveResult(stdout, stderr));
+                }
+                catch (error) {
+                    safeReject(error);
+                }
+            });
+            proc.on('error', (err) => {
+                safeReject(new Error(`${options.startErrorMessage}: ${err.message}`));
+            });
+            if (options.stdinInput !== undefined) {
+                proc.stdin?.write(options.stdinInput);
+                proc.stdin?.end();
+            }
+            timeout = setTimeout(() => {
+                proc.kill();
+                safeReject(new Error(options.timeoutMessage));
+            }, options.timeoutMs);
+        });
+        return {
+            promise,
+            cancel: () => {
+                if (settled) {
+                    return;
+                }
+                proc.kill();
+                safeReject(this.createStreamCancelledError());
+            },
+        };
+    }
     /**
      * Run a pentest session using the Python AI framework
      * This calls main.py which handles all Ollama communication
      */
     async runSession(params) {
-        return new Promise((resolve, reject) => {
-            const args = ['main.py'];
-            // Required: goal
-            args.push('--goal', params.goal);
-            // Target (one of these required)
-            if (params.targetUrl) {
-                args.push('--target-url', params.targetUrl);
-            }
-            if (params.targetRequestFile) {
-                args.push('--target-request-file', params.targetRequestFile);
-            }
-            // Authentication
-            if (params.username) {
-                args.push('--username', params.username);
-            }
-            if (params.password) {
-                args.push('--password', params.password);
-            }
-            if (params.loginUrl) {
-                args.push('--login-url', params.loginUrl);
-            }
-            if (params.usernameField) {
-                args.push('--username-field', params.usernameField);
-            }
-            if (params.passwordField) {
-                args.push('--password-field', params.passwordField);
-            }
-            if (params.submitField) {
-                args.push('--submit-field', params.submitField);
-            }
-            if (params.submitValue) {
-                args.push('--submit-value', params.submitValue);
-            }
-            if (params.extraFormFields) {
-                args.push('--extra-form-fields', JSON.stringify(params.extraFormFields));
-            }
-            if (params.authTimeout !== undefined) {
-                args.push('--auth-timeout', params.authTimeout.toString());
-            }
-            if (params.insecureTls) {
-                args.push('--insecure-tls');
-            }
-            // Crawling
-            if (params.crawlDepth !== undefined) {
-                args.push('--crawl-depth', params.crawlDepth.toString());
-            }
-            // Runtime options
-            if (params.config) {
-                args.push('--config', params.config);
-            }
-            if (params.outputDir) {
-                args.push('--output-dir', params.outputDir);
-            }
-            if (params.autoApprove) {
-                args.push('--auto-approve');
-            }
-            if (params.printFinalState) {
-                args.push('--print-final-state');
-            }
-            if (params.maxTasks !== undefined) {
-                args.push('--max-tasks', params.maxTasks.toString());
-            }
-            if (params.maxReplans !== undefined) {
-                args.push('--max-replans', params.maxReplans.toString());
-            }
-            if (params.maxNewTasksPerReplan !== undefined) {
-                args.push('--max-new-tasks-per-replan', params.maxNewTasksPerReplan.toString());
-            }
-            const sessionId = (0, uuid_1.v4)();
-            let output = '';
-            let errorOutput = '';
-            const proc = (0, child_process_1.spawn)(this.pythonPath, args, {
-                cwd: this.projectRoot,
-                env: { ...process.env },
-            });
-            proc.stdout?.on('data', (data) => {
-                output += data.toString();
-            });
-            proc.stderr?.on('data', (data) => {
-                errorOutput += data.toString();
-            });
-            proc.on('close', (code) => {
-                if (code === 0) {
-                    resolve({ output, sessionId });
-                }
-                else {
-                    reject(new Error(`AI process exited with code ${code}: ${errorOutput || output}`));
-                }
-            });
-            proc.on('error', (err) => {
-                reject(new Error(`Failed to start AI process: ${err.message}`));
-            });
-            // Timeout after 30 minutes for full sessions
-            setTimeout(() => {
-                proc.kill();
-                reject(new Error('AI session timed out after 30 minutes'));
-            }, 1800000);
+        return this.streamSession(params).promise;
+    }
+    streamSession(params, callbacks) {
+        const sessionId = (0, uuid_1.v4)();
+        return this.createOperation({
+            args: this.buildSessionArgs(params),
+            callbacks,
+            timeoutMs: 1800000,
+            startErrorMessage: 'Failed to start AI process',
+            timeoutMessage: 'AI session timed out after 30 minutes',
+            exitErrorLabel: 'AI process failed',
+            resolveResult: (stdout, stderr) => ({
+                output: stdout || stderr,
+                sessionId,
+            }),
         });
     }
     /**
@@ -155,101 +264,31 @@ class AIService {
      * This spawns a Python script that uses the same LLM config as main.py
      */
     async chat(messages, model) {
-        return new Promise((resolve, reject) => {
-            // Format messages for the Python script
-            const messagesJson = JSON.stringify(messages);
-            // Use a simple Python script to chat via the AI's Ollama client
-            const pythonCode = `
-import sys
-import json
-sys.path.insert(0, '.')
-from ai.llm.ollama_client import build_ollama_clients
-from pathlib import Path
-
-messages_raw = '''${messagesJson.replace(/'/g, "\\'")}'''
-messages = json.loads(messages_raw)
-
-# Build LLM client using existing config
-config_path = Path("ai/config/models.local.yaml")
-head_llm, impl_llm, cfg = build_ollama_clients(config_path)
-
-# Convert to LangChain message format
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-
-lc_messages = []
-for msg in messages:
-    if msg["role"] == "system":
-        lc_messages.append(SystemMessage(content=msg["content"]))
-    elif msg["role"] == "user":
-        lc_messages.append(HumanMessage(content=msg["content"]))
-    elif msg["role"] == "assistant":
-        lc_messages.append(AIMessage(content=msg["content"]))
-
-# Use head LLM for chat
-response = head_llm.invoke(lc_messages)
-content = getattr(response, "content", str(response))
-
-# Output as JSON
-print(json.dumps({"content": content}))
-`;
-            const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', pythonCode], {
-                cwd: this.projectRoot,
-                env: { ...process.env },
-            });
-            let output = '';
-            let errorOutput = '';
-            proc.stdout?.on('data', (data) => {
-                output += data.toString();
-            });
-            proc.stderr?.on('data', (data) => {
-                errorOutput += data.toString();
-            });
-            proc.on('close', (code) => {
-                if (code === 0) {
-                    try {
-                        // Find the JSON output (last line with valid JSON)
-                        const lines = output.trim().split('\n');
-                        let result = null;
-                        for (let i = lines.length - 1; i >= 0; i--) {
-                            try {
-                                result = JSON.parse(lines[i]);
-                                break;
-                            }
-                            catch {
-                                continue;
-                            }
-                        }
-                        if (result && result.content) {
-                            resolve({
-                                id: (0, uuid_1.v4)(),
-                                model: model || config_1.default.ollamaModel,
-                                message: {
-                                    role: 'assistant',
-                                    content: result.content,
-                                },
-                                createdAt: Date.now(),
-                            });
-                        }
-                        else {
-                            reject(new Error('No valid response from AI'));
-                        }
-                    }
-                    catch {
-                        reject(new Error(`Failed to parse AI response: ${output}`));
-                    }
+        return this.streamChat(messages, model).promise;
+    }
+    streamChat(messages, model, callbacks) {
+        return this.createOperation({
+            args: ['-u', '-c', this.buildChatPythonScript()],
+            stdinInput: JSON.stringify(messages),
+            callbacks,
+            timeoutMs: 300000,
+            startErrorMessage: 'Failed to start AI',
+            timeoutMessage: 'AI chat timed out',
+            exitErrorLabel: 'AI chat failed',
+            resolveResult: (stdout) => {
+                if (!stdout.trim()) {
+                    throw new Error('No valid response from AI');
                 }
-                else {
-                    reject(new Error(`AI chat failed: ${errorOutput || output}`));
-                }
-            });
-            proc.on('error', (err) => {
-                reject(new Error(`Failed to start AI: ${err.message}`));
-            });
-            // Timeout after 5 minutes for chat
-            setTimeout(() => {
-                proc.kill();
-                reject(new Error('AI chat timed out'));
-            }, 300000);
+                return {
+                    id: (0, uuid_1.v4)(),
+                    model: model || config_1.default.ollamaModel,
+                    message: {
+                        role: 'assistant',
+                        content: stdout,
+                    },
+                    createdAt: Date.now(),
+                };
+            },
         });
     }
     /**
@@ -311,7 +350,26 @@ print(json.dumps(result))
      */
     async isAvailable() {
         return new Promise((resolve) => {
-            const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', 'import ai; print("ok")'], {
+            const pythonCode = `
+import sys
+from pathlib import Path
+
+sys.path.insert(0, ".")
+
+import requests
+from ai.llm.ollama_client import load_model_config, resolve_model_connection
+
+cfg = load_model_config(Path("ai/config/models.local.yaml"))
+conn = resolve_model_connection(cfg, "head")
+base_url = str(conn.get("base_url", "")).rstrip("/")
+if not base_url:
+    raise RuntimeError("Missing Ollama base URL")
+
+response = requests.get(f"{base_url}/api/tags", headers=conn.get("headers", {}), timeout=5)
+response.raise_for_status()
+print("ok")
+`;
+            const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', pythonCode], {
                 cwd: this.projectRoot,
             });
             proc.on('close', (code) => {
