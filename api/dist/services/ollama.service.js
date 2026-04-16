@@ -138,6 +138,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, ".")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from ai.llm.ollama_client import build_ollama_clients
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -171,7 +175,7 @@ for chunk in head_llm.stream(lc_messages):
     createOperation(options) {
         const proc = (0, child_process_1.spawn)(this.pythonPath, options.args, {
             cwd: this.projectRoot,
-            env: { ...process.env },
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         });
         let stdout = '';
         let stderr = '';
@@ -336,6 +340,7 @@ print(json.dumps(result))
 `;
             const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', pythonCode], {
                 cwd: this.projectRoot,
+                env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
             });
             let output = '';
             proc.stdout?.on('data', (data) => {
@@ -409,7 +414,7 @@ print("ok")
 `;
             const proc = (0, child_process_1.spawn)(this.pythonPath, ['-c', pythonCode], {
                 cwd: this.projectRoot,
-                env: { ...process.env },
+                env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
             });
             let settled = false;
             const timeout = setTimeout(() => {
