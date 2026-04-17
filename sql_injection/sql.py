@@ -10,6 +10,7 @@ SQLMAP_BIN = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools", "
 ALLOWED_FLAGS = {
     # targeting
     "-u": "value",
+    "--url": "value",
     "-r": "value",
     "--data": "value",
     "--cookie": "value",
