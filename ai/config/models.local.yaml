@@ -20,21 +20,24 @@ models:
   head:
     # Choose per-role provider: local | cloud
     provider: "cloud"
-    model: "kimi-k2.5" 
+    model: "gemma4:31b-cloud" 
     temperature: 0.2 #original 0.2
     # change the reasoning to true/false for wanted models (especially qwen and deepseek)
     reasoning: false 
     num_ctx: 32768 #32768
   implementor:
     provider: "cloud"
-    model: "kimi-k2.5"
+    model: "glm-4.7"
     temperature: 0.1
     reasoning: false
     num_ctx: 32768 #32768
   embedding:
     provider: "cloud"
-    model: "kimi-k2.5"
+    model: "gemma4:31b-cloud"
 
+# make the embedding local to save API cost when presenting
+# model: nomic-embed-text:latest
+# provider: local
 
 runtime:
   max_tasks: 1
@@ -59,3 +62,11 @@ rag:
 #  - "deepseek-r1:8b"
 #  - "qwen3:4b"
 #  - "qwen3:8b"
+
+# working and functioning API models
+#----------------------------------------
+# minimax-m2.5:cloud
+# glm-4.7:cloud (sometimes repsonses in chinese)
+# GPT_OSS 120B
+# nemotron-3-super:cloud
+# qwen3-coder-next:cloud
