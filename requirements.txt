@@ -8,7 +8,6 @@ beautifulsoup4==4.14.3
 certifi==2026.1.4
 charset-normalizer==3.4.4
 dataclasses-json==0.6.7
-faiss-cpu==1.13.2
 frozenlist==1.8.0
 greenlet==3.3.1
 h11==0.16.0
@@ -38,6 +37,7 @@ orjson==3.11.7
 ormsgpack==1.12.2
 packaging==26.0
 propcache==0.4.1
+psycopg[binary]==3.2.13
 pydantic==2.12.5
 pydantic-settings==2.13.1
 pydantic_core==2.41.5

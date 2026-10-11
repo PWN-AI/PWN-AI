@@ -232,8 +232,13 @@ const bootstrap = async () => {
     state.health = context.health;
     state.provider = context.provider;
   } catch (error) {
-    clearStoredAuth();
-    window.location.href = "/auth";
+    if (error.status === 401) {
+      clearStoredAuth();
+      window.location.href = "/auth";
+    } else {
+      renderMeta(error.message || "Could not load session context.", true);
+      renderChrome();
+    }
     return;
   }
 

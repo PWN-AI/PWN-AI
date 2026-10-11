@@ -1,171 +1,283 @@
-"""FAISS vector store for tool knowledge retrieval.
-
-Wraps FAISS with Ollama embeddings to provide semantic search over
-tool argument documentation. Persists the index to disk so it only
-needs to be built once (or rebuilt when tool docs change).
-"""
-
+"""PostgreSQL storage: text-search anchors plus HNSW, with no query model calls."""
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
-try:
-    import faiss  # type: ignore
-except ImportError:
-    faiss = None
+from ai.rag.embeddings import CohereEmbedder, validate_vector
+
+DEFAULT_DATABASE_URL = "postgresql://pwnai:pwnai_dev@localhost:55432/pwnai_rag"
+DEFAULT_SNAPSHOT = Path(__file__).parent / "database" / "knowledge.json"
+DOCUMENT_FIELDS = ("id", "tool", "category", "content", "embedded_content_hash", "embedding")
+
+
+def digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def document_hash(document: Dict[str, Any]) -> str:
+    return digest({key: document[key] for key in ("tool", "category", "content")})
+
+
+def read_snapshot(path: Path) -> Dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("format_version") != 1:
+        raise ValueError("Unsupported RAG database snapshot format.")
+    if set(payload) != {"format_version", "embedding_profile", "documents"}:
+        raise ValueError("Unexpected database snapshot fields.")
+    profile = payload["embedding_profile"]
+    if (not isinstance(profile, dict) or set(profile) != {"provider", "model", "dimensions"}
+            or any(not isinstance(profile[key], str) or not profile[key].strip()
+                   for key in ("provider", "model"))
+            or profile["dimensions"] != 1024):
+        raise ValueError("The snapshot needs an embedding profile with 1024 dimensions.")
+    documents = payload["documents"]
+    if not isinstance(documents, list):
+        raise ValueError("Snapshot documents must be a list.")
+    ids = set()
+    for document in documents:
+        if not isinstance(document, dict) or set(document) != set(DOCUMENT_FIELDS):
+            raise ValueError("Unexpected document fields in snapshot.")
+        for field in ("id", "tool", "category", "content"):
+            if not isinstance(document[field], str) or not document[field].strip():
+                raise ValueError(f"Document {field} must be a nonempty string.")
+        if document["id"] in ids:
+            raise ValueError(f"Duplicate document ID: {document['id']}")
+        ids.add(document["id"])
+        if document["embedded_content_hash"] is not None and not isinstance(document["embedded_content_hash"], str):
+            raise ValueError("Invalid embedded content hash.")
+        if document["embedding"] is not None:
+            validate_vector(document["embedding"])
+    payload["documents"] = sorted(documents, key=lambda document: document["id"])
+    return payload
+
+
+def write_snapshot(path: Path, payload: Dict[str, Any]) -> None:
+    """Write a deterministic portable database export atomically."""
+    content = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+class SnapshotConflictError(ValueError):
+    pass
 
 
 class ToolVectorStore:
-    """Lightweight FAISS vector store with Ollama embeddings."""
+    def __init__(self, database_url: Optional[str] = None,
+                 snapshot_path: Path = DEFAULT_SNAPSHOT,
+                 embedder: Optional[CohereEmbedder] = None):
+        self.database_url = database_url or os.getenv("RAG_DATABASE_URL") or DEFAULT_DATABASE_URL
+        self.snapshot_path = Path(snapshot_path)
+        self.embedder = embedder or CohereEmbedder()
+        self.last_embedded_count = 0
 
-    INDEX_FILE = "tool_knowledge.faiss"
-    META_FILE = "tool_knowledge_meta.json"
+    def _connect(self):
+        return psycopg.connect(self.database_url, connect_timeout=10, row_factory=dict_row)
 
-    def __init__(
-        self,
-        persist_dir: str | Path,
-        ollama_base_url: str = "http://localhost:11434",
-        embedding_model: str = "nomic-embed-text",
-        ollama_headers: Optional[Dict[str, str]] = None,
-    ):
-        if faiss is None:
-            raise ImportError("faiss-cpu is required. Install with: pip install faiss-cpu")
+    def _initialize(self, connection) -> None:
+        connection.execute((Path(__file__).parent / "database" / "001_schema.sql").read_text(encoding="utf-8"))
 
-        self.persist_dir = Path(persist_dir)
-        self.persist_dir.mkdir(parents=True, exist_ok=True)
-        self.ollama_base_url = ollama_base_url.rstrip("/")
-        self.embedding_model = embedding_model
-        self.ollama_headers = dict(ollama_headers or {})
+    @staticmethod
+    def _rows(connection) -> List[Dict[str, Any]]:
+        rows = connection.execute(
+            "SELECT id, tool, category, content, embedded_content_hash, embedding::text "
+            "FROM pwnai_rag.documents ORDER BY id"
+        ).fetchall()
+        for row in rows:
+            row["embedding"] = json.loads(row["embedding"]) if row["embedding"] else None
+        return rows
 
-        self._index: Optional[faiss.IndexFlatIP] = None
-        self._documents: List[Dict[str, str]] = []
-        self._embeddings_dim: int = 0
+    @staticmethod
+    def _payload(rows: List[Dict[str, Any]], profile: Dict[str, Any]) -> Dict[str, Any]:
+        return {"format_version": 1, "embedding_profile": profile,
+                "documents": sorted(rows, key=lambda document: document["id"])}
 
-    # ── Embedding ──────────────────────────────────────────────
+    @staticmethod
+    def _metadata(connection) -> Dict[str, Any]:
+        return {row["key"]: row["value"] for row in connection.execute(
+            "SELECT key, value FROM pwnai_rag.metadata"
+        ).fetchall()}
 
-    def _embed_texts(self, texts: List[str]) -> np.ndarray:
-        """Get embeddings from Ollama embedding endpoint."""
-        import urllib.request
+    @staticmethod
+    def _set_metadata(connection, key: str, value: Any) -> None:
+        connection.execute(
+            "INSERT INTO pwnai_rag.metadata (key, value) VALUES (%s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, Jsonb(value))
+        )
 
-        embeddings: List[List[float]] = []
-        for text in texts:
-            payload = json.dumps({
-                "model": self.embedding_model,
-                "prompt": text,
-            }).encode("utf-8")
-            headers = {"Content-Type": "application/json"}
-            headers.update(self.ollama_headers)
-            req = urllib.request.Request(
-                f"{self.ollama_base_url}/api/embeddings",
-                data=payload,
-                headers=headers,
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-                embeddings.append(result["embedding"])
+    @staticmethod
+    def _upsert(connection, document: Dict[str, Any]) -> None:
+        embedding = json.dumps(document["embedding"]) if document["embedding"] is not None else None
+        connection.execute(
+            "INSERT INTO pwnai_rag.documents (id, tool, category, content, embedded_content_hash, embedding) "
+            "VALUES (%s, %s, %s, %s, %s, %s::vector) ON CONFLICT (id) DO UPDATE SET "
+            "tool = EXCLUDED.tool, category = EXCLUDED.category, content = EXCLUDED.content, "
+            "embedded_content_hash = EXCLUDED.embedded_content_hash, embedding = EXCLUDED.embedding",
+            (document["id"], document["tool"], document["category"], document["content"],
+             document["embedded_content_hash"], embedding),
+        )
 
-        arr = np.array(embeddings, dtype=np.float32)
-        # L2-normalize for cosine similarity via inner product
-        norms = np.linalg.norm(arr, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1, norms)
-        return arr / norms
+    def synchronize(self, *, force: bool = False, prefer: str = "auto") -> int:
+        """Restore pulled snapshots, embed changed rows, and export DB edits.
 
-    # ── Index management ──────────────────────────────────────
+        An advisory lock serializes updates. Simultaneous file and database edits
+        need explicit conflict resolution. Embedding failures roll back SQL changes.
+        """
+        if prefer not in {"auto", "snapshot", "database"}:
+            raise ValueError("prefer must be auto, snapshot, or database.")
+        self.last_embedded_count = 0
+        with self._connect() as connection:
+            connection.execute("SELECT pg_advisory_xact_lock(715021841)")
+            # Read after taking the lock: another synchronizer may have exported
+            # this file while we waited. Do not restore an obsolete copy.
+            snapshot = read_snapshot(self.snapshot_path)
+            snapshot_digest = digest(snapshot)
+            self._initialize(connection)
+            connection.execute("LOCK TABLE pwnai_rag.documents IN SHARE ROW EXCLUSIVE MODE")
+            metadata = self._metadata(connection)
+            rows = self._rows(connection)
+            stored_profile = metadata.get("embedding_profile", snapshot["embedding_profile"])
+            database_digest = digest(self._payload(rows, stored_profile))
+            file_changed = snapshot_digest != metadata.get("snapshot_digest")
+            database_changed = bool(metadata) and database_digest != metadata.get("database_digest")
+            if file_changed and database_changed and prefer == "auto":
+                raise SnapshotConflictError(
+                    "Both knowledge.json and PostgreSQL changed. Reconcile the edits, then run "
+                    "python -m ai.rag.ingest --prefer snapshot or --prefer database."
+                )
+            if not metadata or (file_changed and prefer != "database"):
+                connection.execute("DELETE FROM pwnai_rag.documents")
+                rows = snapshot["documents"]
+                stored_profile = snapshot["embedding_profile"]
+                for document in rows:
+                    self._upsert(connection, document)
 
-    def build_index(self, documents: List[Dict[str, str]]) -> None:
-        """Build FAISS index from tool knowledge documents."""
-        texts = [
-            f"[{doc['tool']}] [{doc['category']}]\n{doc['content']}"
-            for doc in documents
-        ]
-        print(f"[RAG] Embedding {len(texts)} documents with {self.embedding_model}...")
-        embeddings = self._embed_texts(texts)
+            profile_changed = stored_profile != self.embedder.profile
+            changed = [document for document in rows if force or profile_changed
+                       or document["embedding"] is None
+                       or document["embedded_content_hash"] != document_hash(document)]
+            if changed:
+                texts = [f"[{document['tool']}] [{document['category']}]\n{document['content']}"
+                         for document in changed]
+                vectors = self.embedder.embed_documents(texts)
+                if len(vectors) != len(changed):
+                    raise ValueError("Embedding provider returned an unexpected vector count.")
+                for document, vector in zip(changed, vectors):
+                    validate_vector(vector)
+                    document["embedding"] = vector
+                    document["embedded_content_hash"] = document_hash(document)
+                    self._upsert(connection, document)
 
-        self._embeddings_dim = embeddings.shape[1]
-        self._index = faiss.IndexFlatIP(self._embeddings_dim)
-        self._index.add(embeddings)
-        self._documents = documents
+            payload = self._payload(self._rows(connection), self.embedder.profile)
+            exported_digest = digest(payload)
+            self._set_metadata(connection, "embedding_profile", self.embedder.profile)
+            self._set_metadata(connection, "snapshot_digest", exported_digest)
+            self._set_metadata(connection, "database_digest", exported_digest)
+            # The export can restore SQL state if the following commit fails.
+            write_snapshot(self.snapshot_path, payload)
+            connection.execute("ANALYZE pwnai_rag.documents")
+        self.last_embedded_count = len(changed)
+        return self.last_embedded_count
 
-        self._save()
-        print(f"[RAG] Index built: {len(documents)} docs, {self._embeddings_dim}d vectors.")
-
-    def _save(self) -> None:
-        """Persist index and metadata to disk."""
-        if self._index is None:
-            return
-        index_path = self.persist_dir / self.INDEX_FILE
-        meta_path = self.persist_dir / self.META_FILE
-
-        faiss.write_index(self._index, str(index_path))
-        meta = {
-            "documents": self._documents,
-            "dim": self._embeddings_dim,
-            "embedding_model": self.embedding_model,
-        }
-        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-
-    def load(self) -> bool:
-        """Load persisted index from disk. Returns True if successful."""
-        index_path = self.persist_dir / self.INDEX_FILE
-        meta_path = self.persist_dir / self.META_FILE
-
-        if not index_path.exists() or not meta_path.exists():
-            return False
-
-        try:
-            self._index = faiss.read_index(str(index_path))
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            self._documents = meta["documents"]
-            self._embeddings_dim = meta["dim"]
-            return True
-        except Exception as exc:
-            print(f"[RAG] Failed to load index: {exc}")
-            return False
+    @property
+    def document_count(self) -> int:
+        with self._connect() as connection:
+            return connection.execute("SELECT count(*) AS count FROM pwnai_rag.documents").fetchone()["count"]
 
     @property
     def is_ready(self) -> bool:
-        return self._index is not None and len(self._documents) > 0
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT count(*) AS total, count(embedding) AS embedded FROM pwnai_rag.documents"
+            ).fetchone()
+        return row["total"] > 0 and row["total"] == row["embedded"]
 
-    # ── Search ────────────────────────────────────────────────
+    def documents_for_tool(self, tool_name: str) -> List[Dict[str, str]]:
+        with self._connect() as connection:
+            return connection.execute(
+                "SELECT id, tool, category, content FROM pwnai_rag.documents WHERE tool = %s ORDER BY id",
+                (tool_name,),
+            ).fetchall()
 
-    def search(
-        self,
-        query: str,
-        top_k: int = 4,
-        tool_filter: Optional[str] = None,
-    ) -> List[Tuple[Dict[str, str], float]]:
-        """Search for documents similar to the query.
+    def search(self, query: str, top_k: int = 4,
+               tool_filter: Optional[str] = None) -> List[Tuple[Dict[str, str], float]]:
+        """Fuse text results and HNSW neighbors of stored anchors, without a model.
 
-        Returns list of (document, score) tuples sorted by relevance.
+        This is document-to-document expansion, not semantic embedding of a novel
+        query. All document vectors are computed at synchronization time.
         """
-        if not self.is_ready:
+        if top_k <= 0:
             return []
+        tokens = re.findall(r"[a-zA-Z][a-zA-Z0-9_-]*", query.lower())
+        if not tokens:
+            return []
+        lexical_query = " OR ".join(tokens[:80])
+        pool_size = max(top_k * 4, 12)
+        with self._connect() as connection:
+            anchors = connection.execute(
+                "SELECT id, tool, category, content, embedding::text, "
+                "ts_rank_cd(search_text, websearch_to_tsquery('english', %s), 32) AS rank "
+                "FROM pwnai_rag.documents WHERE search_text @@ websearch_to_tsquery('english', %s) "
+                "AND (%s::text IS NULL OR tool = %s) ORDER BY rank DESC, id LIMIT %s",
+                (lexical_query, lexical_query, tool_filter, tool_filter, pool_size),
+            ).fetchall()
+            if not anchors:
+                if tool_filter is None:
+                    return []
+                anchors = connection.execute(
+                    "SELECT id, tool, category, content, embedding::text FROM pwnai_rag.documents "
+                    "WHERE tool = %s ORDER BY (category = 'overview') DESC, id LIMIT 1",
+                    (tool_filter,),
+                ).fetchall()
+            documents: Dict[str, Dict[str, str]] = {}
+            scores: Dict[str, float] = {}
 
-        query_vec = self._embed_texts([query])
-        # Search more if filtering by tool to ensure enough results
-        search_k = top_k * 3 if tool_filter else top_k
-        scores, indices = self._index.search(query_vec, min(search_k, len(self._documents)))
+            def add(rows, weight: float) -> None:
+                for rank, row in enumerate(rows, 1):
+                    key = row["id"]
+                    documents[key] = {field: row[field] for field in ("id", "tool", "category", "content")}
+                    scores[key] = scores.get(key, 0.0) + weight / (60 + rank)
 
-        results: List[Tuple[Dict[str, str], float]] = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(self._documents):
-                continue
-            doc = self._documents[idx]
-            if tool_filter and doc["tool"] != tool_filter:
-                continue
-            results.append((doc, float(score)))
-            if len(results) >= top_k:
-                break
-
-        return results
-
-    @staticmethod
-    def compute_docs_hash(documents: List[Dict[str, str]]) -> str:
-        """Compute hash of documents to detect changes."""
-        content = json.dumps(documents, sort_keys=True)
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+            add(anchors, 2.0)
+            connection.execute("SET LOCAL hnsw.ef_search = 64")
+            connection.execute("SET LOCAL hnsw.iterative_scan = 'strict_order'")
+            # Use HNSW explicitly even for the small testing corpus.
+            connection.execute("SET LOCAL enable_seqscan = off")
+            connection.execute("SET LOCAL enable_sort = off")
+            for anchor in anchors[:3]:
+                if anchor["embedding"] is None:
+                    continue
+                neighbors = connection.execute(
+                    "SELECT id, tool, category, content FROM pwnai_rag.documents "
+                    "WHERE (%s::text IS NULL OR tool = %s) "
+                    "ORDER BY embedding <=> %s::vector LIMIT %s",
+                    (tool_filter, tool_filter, anchor["embedding"], pool_size),
+                ).fetchall()
+                add(neighbors, 1.0)
+        ranked = sorted(scores, key=lambda key: (-scores[key], key))[:top_k]
+        maximum = max(scores.values()) if scores else 1.0
+        return [(documents[key], scores[key] / maximum) for key in ranked]

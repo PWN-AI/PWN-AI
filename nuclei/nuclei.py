@@ -125,8 +125,7 @@ def default_nuclei_guesses() -> List[str]:
     project_root = os.path.dirname(script_dir)
     return [
         # Workspace-local bundled binary (Windows-friendly default in this repo)
-        os.path.join(project_root, "tools", "nuclei", "nuclei.exe"),
-        os.path.join(project_root, "tools", "nuclei", "nuclei"),
+        os.path.join(project_root, "tools", "nuclei", "nuclei.exe" if os.name == "nt" else "nuclei"),
         # Common user installs
         "~/go/bin/nuclei",
     ]
@@ -161,17 +160,21 @@ class Finding:
 def detect_templates_root(user_path: Optional[str]) -> str:
     """
     Prefer user provided path.
-    Otherwise, prefer project-local nuclei-templates, then ~/nuclei-templates.
+    Otherwise, use a populated project-local, tools-local or user directory.
     """
     if user_path:
         return os.path.expanduser(user_path)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
-    local_default = os.path.join(project_root, "nuclei-templates")
-    if os.path.isdir(local_default):
-        return local_default
-    user_default = os.path.expanduser("~/nuclei-templates")
-    return user_default if os.path.isdir(user_default) else ""
+    candidates = [
+        os.path.join(project_root, "nuclei-templates"),
+        os.path.join(project_root, "tools", "nuclei-templates"),
+        os.path.expanduser("~/nuclei-templates"),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate) and has_templates(candidate):
+            return candidate
+    return ""
 
 
 def has_templates(templates_root: str) -> bool:
@@ -208,6 +211,8 @@ def run_nuclei(
         "-tags", tags,
         "-jsonl",
         "-o", out_jsonl,
+        # Keep scans reproducible and bounded; install/update templates explicitly.
+        "-duc",
     ]
 
     if cfg.silent:

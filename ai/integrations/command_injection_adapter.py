@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -229,7 +230,7 @@ class CommandInjectionAdapter(ToolAdapter):
             url = kwargs.pop("url", None)
             request_file = kwargs.pop("request_file", None)
             data = kwargs.pop("data", None)
-            python_bin = kwargs.pop("python_bin", "python")
+            python_bin = kwargs.pop("python_bin", sys.executable)
             max_runtime = kwargs.pop("max_runtime_seconds", 600)
 
             if url:
@@ -247,6 +248,9 @@ class CommandInjectionAdapter(ToolAdapter):
 
             # Agent-friendly defaults
             options.setdefault("--batch", True)
+            # A non-TTY stdin otherwise makes Commix consume an empty target
+            # list instead of scanning the explicit --url/-r.
+            options["--ignore-stdin"] = True
             # Prevent commix from entering interactive os_shell after command execution
             options["--answers"] = "Do you want to spawn=N"
 
@@ -270,30 +274,29 @@ class CommandInjectionAdapter(ToolAdapter):
                 shell=False,
             )
 
-            def _drain_stderr(p: subprocess.Popen, buf: list[str]):
-                assert p.stderr is not None
-                for line in p.stderr:
+            def _drain(stream, buf: list[str]):
+                assert stream is not None
+                for line in stream:
                     buf.append(line)
                     print(line, end="", flush=True)
 
-            t = threading.Thread(target=_drain_stderr, args=(proc, stderr_lines), daemon=True)
-            t.start()
+            readers = [
+                threading.Thread(target=_drain, args=(proc.stdout, stdout_lines), daemon=True),
+                threading.Thread(target=_drain, args=(proc.stderr, stderr_lines), daemon=True),
+            ]
+            for reader in readers:
+                reader.start()
 
-            assert proc.stdout is not None
-            try:
-                for line in proc.stdout:
-                    stdout_lines.append(line)
-                    print(line, end="", flush=True)
-            except Exception:
-                pass
-
+            timed_out = False
             try:
                 proc.wait(timeout=max_runtime)
             except subprocess.TimeoutExpired:
+                timed_out = True
                 proc.kill()
                 proc.wait()
 
-            t.join(timeout=5)
+            for reader in readers:
+                reader.join(timeout=5)
 
             stdout_text = "".join(stdout_lines)
             stderr_text = "".join(stderr_lines)
@@ -308,6 +311,7 @@ class CommandInjectionAdapter(ToolAdapter):
                 stdout=stdout_text,
                 stderr=stderr_text,
                 raw_output={"command": cmd, "returncode": proc.returncode},
+                error=f"Scan timed out after {max_runtime}s." if timed_out else None,
             )
         except Exception as exc:
             print(f"[Command Injection] ERROR: {exc}")

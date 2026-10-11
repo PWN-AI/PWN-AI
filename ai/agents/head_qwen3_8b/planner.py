@@ -323,6 +323,7 @@ class HeadPlanner:
                     user_message=user_message,
                     retriever=self.retriever,
                     label="Head Planner",
+                    initial_query=user_goal,
                 )
                 text = react_result.final_output
                 print(f"\n[Head Planner] ReAct completed: {react_result.total_llm_calls} LLM call(s), "
@@ -509,6 +510,7 @@ class HeadPlanner:
                     user_message=user_message,
                     retriever=self.retriever,
                     label="Head Planner (Replan)",
+                    initial_query=f"{user_goal} {current_task.tool_hint} {current_task.objective}",
                 )
                 text = react_result.final_output
                 print(f"\n[Head Planner] Replan ReAct completed: {react_result.total_llm_calls} LLM call(s), "
