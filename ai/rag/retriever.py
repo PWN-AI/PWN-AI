@@ -12,7 +12,7 @@ from ai.rag.vector_store import ToolVectorStore
 
 
 class ToolRetriever:
-    """Retrieve PostgreSQL text anchors and stored-vector HNSW neighbors."""
+    """Retrieves tool knowledge from the FAISS vector store."""
 
     def __init__(self, store: ToolVectorStore):
         self.store = store
@@ -53,7 +53,10 @@ class ToolRetriever:
         if not self.store.is_ready:
             return "[RAG] Knowledge base not initialized."
 
-        docs = self.store.documents_for_tool(tool_name)
+        docs = [
+            doc for doc in self.store._documents
+            if doc["tool"] == tool_name
+        ]
         if not docs:
             return f"[RAG] No documentation found for tool: {tool_name}"
 

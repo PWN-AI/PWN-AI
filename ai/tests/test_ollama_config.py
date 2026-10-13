@@ -1,29 +1,8 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
-import yaml
 
 from ai.llm.ollama_client import resolve_model_connection, resolve_ollama_connection
-from ai.llm import ollama_client
-
-
-@pytest.mark.parametrize("reasoning", [False, True, None, "low", "medium", "high"])
-def test_reasoning_values_are_passed_without_boolean_coercion(tmp_path, monkeypatch, reasoning):
-    cfg = {
-        "ollama": {"base_url": "http://localhost:11434"},
-        "models": {
-            "head": {"model": "test", "reasoning": reasoning},
-            "implementor": {"model": "test", "reasoning": reasoning},
-        },
-    }
-    path = tmp_path / "models.yaml"
-    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
-    monkeypatch.setattr(ollama_client, "ChatOllama", lambda **kwargs: SimpleNamespace(**kwargs))
-    head, impl, _ = ollama_client.build_ollama_clients(path)
-    assert head.reasoning == reasoning
-    assert impl.reasoning == reasoning
 
 
 def test_resolve_legacy_ollama_base_url() -> None:

@@ -20,17 +20,25 @@ models:
   head:
     # Choose per-role provider: local | cloud
     provider: "cloud"
-    model: "nemotron-3-super:cloud"
+    model: "gemma4:31b-cloud" 
     temperature: 0.2 #original 0.2
-    # GPT-OSS uses low/medium/high; other models may use true/false.
-    reasoning: "low"
+    # change the reasoning to true/false for wanted models (especially qwen and deepseek)
+    reasoning: false 
     num_ctx: 32768 #32768
   implementor:
     provider: "cloud"
-    model: "nemotron-3-super:cloud"
+    model: "glm-4.7"
     temperature: 0.1
-    reasoning: "low"
+    reasoning: false
     num_ctx: 32768 #32768
+  embedding:
+    provider: "cloud"
+    model: "gemma4:31b-cloud"
+
+# make the embedding local to save API cost when presenting
+# model: nomic-embed-text:latest
+# provider: local
+
 runtime:
   max_tasks: 1
   max_replans: 8
@@ -40,13 +48,7 @@ runtime:
 
 rag:
   enabled: true
-  database_url_env: "RAG_DATABASE_URL"
-  snapshot_path: "ai/rag/database/knowledge.sql"
-  embedding:
-    provider: "cohere"
-    model: "embed-v4.0"
-    dimensions: 1024
-    api_key_env: "COHERE_API_KEY"
+  persist_dir: "ai/rag/index"
   # Maximum ReAct iterations for head planner (plan/replan)
   max_react_iterations_head: 4
   # Maximum ReAct iterations for implementor

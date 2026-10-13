@@ -15,7 +15,7 @@ from ai.execution.run_manager import RunManager
 from ai.llm.ollama_client import build_ollama_clients, resolve_model_connection
 from ai.orchestration.langgraph_flow import build_phase1_graph
 from ai.orchestration.state import SessionState
-from ai.rag.ingest import store_from_config
+from ai.rag.ingest import ensure_index_ready
 from ai.rag.retriever import ToolRetriever
 from ai.reporting.report_generator import ReportGenerator
 from ai.safety.action_filter import ActionFilter
@@ -92,10 +92,25 @@ def run_session(args: argparse.Namespace) -> SessionState:
     retriever = None
 
     if rag_enabled:
+        embed_conn = resolve_model_connection(cfg, "embedding")
+        ollama_base_url = embed_conn["base_url"]
+        ollama_headers = embed_conn.get("headers", {})
+        embedding_model = cfg.get("models", {}).get("embedding", {}).get("model", "nomic-embed-text")
+        persist_dir = project_root / rag_cfg.get("persist_dir", "ai/rag/index")
+        print(
+            f"[RAG] embedding provider: {embed_conn['provider']} | "
+            f"base_url: {ollama_base_url} | model: {embedding_model}"
+        )
+
         try:
-            store = store_from_config(cfg, project_root)
+            store = ensure_index_ready(
+                persist_dir=persist_dir,
+                ollama_base_url=ollama_base_url,
+                embedding_model=embedding_model,
+                ollama_headers=ollama_headers,
+            )
             retriever = ToolRetriever(store)
-            print(f"[RAG] Tool knowledge base initialized ({store.document_count} vectors).")
+            print(f"[RAG] Tool knowledge base initialized ({store._index.ntotal} vectors).")
         except Exception as exc:
             print(f"[RAG] WARNING: Failed to initialize RAG: {exc}")
             print("[RAG] Continuing without RAG retrieval (LLMs will use pretrained knowledge only).")

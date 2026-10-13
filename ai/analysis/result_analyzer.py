@@ -67,7 +67,7 @@ class ResultAnalyzer:
         if request.tool_name == "sql_injection":
             strong_sqli_signals = [
                 "sqlmap identified the following injection point",
-                "is injectable",
+                "parameter" and "injectable",
                 "available databases",
                 "back-end dbms",
                 "fetched data logged",
@@ -118,7 +118,8 @@ class ResultAnalyzer:
             strong_cmdi_signals = [
                 "identified the following injection point",
                 "the target is vulnerable",
-                "appears to be injectable",
+                "remote command execution",
+                "os command injection",
             ]
             has_strong_signal = any(s in lowered for s in strong_cmdi_signals)
             if has_strong_signal:

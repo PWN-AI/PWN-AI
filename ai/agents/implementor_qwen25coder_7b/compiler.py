@@ -103,8 +103,6 @@ class ImplementorCompiler:
                     user_message=user_message,
                     retriever=self.retriever,
                     label="Implementor",
-                    initial_query=f"{task.title} {task.objective} arguments flags",
-                    initial_tool_filter=task.tool_hint,
                 )
                 text = react_result.final_output
                 print(f"[Implementor] ReAct completed: {react_result.total_llm_calls} LLM call(s), "

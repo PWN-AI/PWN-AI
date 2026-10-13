@@ -29,7 +29,6 @@ ALLOWED_FLAGS = {
     "-t": "value",  # traffic file
     "--time-limit": "value",
     "--batch": "bool",
-    "--ignore-stdin": "bool",
     "--skip-heuristics": "bool",
     "--codec": "value",
     "--charset": "value",

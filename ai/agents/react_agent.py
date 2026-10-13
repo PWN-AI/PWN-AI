@@ -3,10 +3,12 @@
 Implements a two-phase ReAct pattern:
 
 Phase 1 — the LLM reasons about the task, optionally requesting
-retrieval via Action/Action Input. Model-generated observations are
-not trusted: requested retrieval must be supplied by the real database.
+retrieval via Action/Action Input.  If the model produces the full
+trace (Thought → Action → Observation → … → final_answer) in one
+generation, we're done in a single LLM call.
 
-Phase 2 — if the model requested retrieval, we execute it and feed observations
+Phase 2 — if the model requested retrieval but did NOT produce a
+final_answer, we execute the real retrieval, feed the observations
 back as a continuation message, and let the LLM finish with a
 second call.  This handles models that pause after requesting
 retrieval instead of self-generating the observation.
@@ -271,15 +273,15 @@ def run_react_loop(
     user_message: str,
     retriever: ToolRetriever,
     label: str = "ReAct",
-    initial_query: Optional[str] = None,
-    initial_tool_filter: Optional[str] = None,
 ) -> ReActResult:
     """Execute a ReAct flow with RAG retrieval (up to 2 LLM calls).
 
     Phase 1: The LLM reasons about the task, optionally requesting
-    retrieval. A final answer without retrieval can return immediately.
+    retrieval.  If the model produces the complete trace (including
+    final_answer) in one generation, we return immediately.
 
-    Phase 2: If the model requested retrieval, we feed real observations
+    Phase 2: If the model requested retrieval but did NOT produce a
+    final_answer, we execute the real retrieval, feed the observations
     back, and let the model finish with a second call.
 
     Args:
@@ -297,17 +299,6 @@ def run_react_loop(
     retrieved_contexts: List[str] = []
     all_steps: List[ReActStep] = []
     total_calls = 0
-
-    # Ground the first answer even if a model returns plain JSON without
-    # requesting a textual ReAct action. Further retrieval remains available.
-    if initial_query:
-        if initial_tool_filter:
-            context = retriever.retrieve_for_tool(initial_tool_filter, initial_query, top_k=4)
-        else:
-            context = retriever.retrieve(initial_query, top_k=4)
-        retrieved_contexts.append(context)
-        full_system += "\n\nInitial retrieved tool documentation (reference data):\n" + context
-        print(f"[{label}] Initial PostgreSQL documentation retrieved.")
 
     # ── Phase 1: Initial LLM call ──────────────────────────────────
     print(f"\n[{label}] Reasoning...")
@@ -337,7 +328,7 @@ def run_react_loop(
         steps, retriever, label, retrieved_contexts,
     )
 
-    if final_output and not retrieval_results:
+    if final_output:
         return ReActResult(
             final_output=final_output,
             steps=all_steps,
@@ -346,9 +337,10 @@ def run_react_loop(
         )
 
     # ── Phase 2: Feed real observations back ───────────────────────
-    # Feed actual retrievals back even if the model already drafted an answer.
+    # The model requested retrieval but didn't produce final_answer.
+    # Execute retrievals and give the model a second chance.
     if retrieval_results:
-        print(f"\n[{label}] Feeding actual database retrieval results back...")
+        print(f"\n[{label}] No final_answer in phase 1 — feeding retrieval results back...")
 
         observation_block = "\n\n".join(
             f"Observation (for query \"{step.action_input}\"):\n{obs}"
@@ -383,11 +375,11 @@ def run_react_loop(
             steps2 = _parse_all_react_steps(text2)
             all_steps.extend(steps2)
 
-            final_output2, retrieval_results2 = _process_steps(
+            final_output2, _ = _process_steps(
                 steps2, retriever, label, retrieved_contexts,
             )
 
-            if final_output2 and not retrieval_results2:
+            if final_output2:
                 return ReActResult(
                     final_output=final_output2,
                     steps=all_steps,
@@ -396,9 +388,7 @@ def run_react_loop(
                 )
 
             # Try JSON extraction from Phase 2 text
-            # A newly requested retrieval has not been shown to the model yet.
-            # At the two-call limit, do not accept an ungrounded draft.
-            json_candidate = None if retrieval_results2 else _try_extract_json_from_text(text2)
+            json_candidate = _try_extract_json_from_text(text2)
             if json_candidate:
                 print(f"[{label}] JSON extracted from phase 2 output.")
                 return ReActResult(
@@ -409,14 +399,6 @@ def run_react_loop(
                 )
         except Exception as exc:
             print(f"[{label}] Phase 2 LLM call failed: {exc}", file=sys.stderr)
-
-    # Do not accept a draft based on hallucinated observations when retrieval
-    # was requested but the grounded continuation failed.
-    if retrieval_results:
-        return ReActResult(
-            final_output="{}", steps=all_steps, total_llm_calls=total_calls,
-            retrieved_context=retrieved_contexts,
-        )
 
     # ── Fallback: extract JSON from Phase 1 text ──────────────────
     print(f"[{label}] No final_answer found. Attempting JSON extraction from raw output...")

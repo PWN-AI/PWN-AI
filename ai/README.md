@@ -2,12 +2,12 @@
 
 This is the Phase 1 implementation for the AI layer:
 - Two Ollama-backed models (local or cloud mode)
-  - Head LLM: cloud `gpt-oss:120b` (change in YAML as needed)
-  - Implementor LLM: cloud `gpt-oss:120b`
+  - Head LLM: `qwen3:8b`
+  - Implementor LLM: `qwen2.5-coder:7b`
 - LangGraph orchestration loop
-- PostgreSQL/pgvector RAG with HNSW and versioned document embeddings
+- No RAG
 - Per-action permission prompt via `ActionFilter`
-- Express API and browser interface; no background workers
+- No API and no background workers in this phase
 
 ## Run
 
@@ -69,12 +69,8 @@ models:
     provider: "cloud"       # or "local"
   implementor:
     provider: "local"       # or "cloud"
-rag:
   embedding:
-    provider: "cohere"      # independent of the chat providers
-    model: "embed-v4.0"
-    dimensions: 1024
-    api_key_env: "COHERE_API_KEY"
+    provider: "local"       # or "cloud"
 ```
 
 Cloud API key (recommended via env var):
@@ -102,7 +98,7 @@ ollama:
 
 ## Notes
 
-1. Follow [RAG database setup](rag/README.md) before running. Unchanged knowledge does not call an embedding model.
+1. Phase 1 intentionally skips RAG.
 2. If credentials are provided with URL mode, the runner attempts pre-auth and injects the session cookie into tool requests.
 3. Every action asks operator approval unless `--auto-approve` is set.
 4. Reports are written to `artifacts/phase1/`.

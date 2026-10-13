@@ -213,7 +213,7 @@ def build_ollama_clients(config_path: Path) -> Tuple[ChatOllama, ChatOllama, Dic
         "num_ctx": int(head_cfg.get("num_ctx", 32768)),
     }
     if "reasoning" in head_cfg:
-        head_kwargs["reasoning"] = head_cfg["reasoning"]
+        head_kwargs["reasoning"] = bool(head_cfg["reasoning"])
     if head_conn.get("headers"):
         head_kwargs["client_kwargs"] = {"headers": dict(head_conn["headers"])}
 
@@ -224,7 +224,7 @@ def build_ollama_clients(config_path: Path) -> Tuple[ChatOllama, ChatOllama, Dic
         "num_ctx": int(impl_cfg.get("num_ctx", 32768)),
     }
     if "reasoning" in impl_cfg:
-        impl_kwargs["reasoning"] = impl_cfg["reasoning"]
+        impl_kwargs["reasoning"] = bool(impl_cfg["reasoning"])
     if impl_conn.get("headers"):
         impl_kwargs["client_kwargs"] = {"headers": dict(impl_conn["headers"])}
 
