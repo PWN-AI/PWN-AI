@@ -1,4 +1,4 @@
-"""Synchronize the versioned knowledge snapshot with PostgreSQL/pgvector."""
+"""Synchronize the versioned SQL database dump with PostgreSQL/pgvector."""
 from __future__ import annotations
 
 import argparse
@@ -32,7 +32,7 @@ def store_from_config(cfg, project_root: Path, **overrides) -> ToolVectorStore:
         raise ValueError("RAG embeddings require provider: cohere")
     settings = {
         "database_url": os.getenv(rag.get("database_url_env", "RAG_DATABASE_URL")),
-        "snapshot_path": project_root / rag.get("snapshot_path", "ai/rag/database/knowledge.json"),
+        "snapshot_path": project_root / rag.get("snapshot_path", "ai/rag/database/knowledge.sql"),
         "model": embedding.get("model", "embed-v4.0"),
         "dimensions": embedding.get("dimensions", 1024),
         "api_key_env": embedding.get("api_key_env", "COHERE_API_KEY"),
@@ -47,7 +47,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(root / "ai/config/models.local.yaml"))
     parser.add_argument("--database-url")
-    parser.add_argument("--snapshot", type=Path)
+    parser.add_argument("--snapshot", type=Path, help="Path to the versioned SQL database dump")
     parser.add_argument("--force", action="store_true", help="Re-embed every document")
     parser.add_argument("--prefer", choices=("auto", "snapshot", "database"), default="auto")
     parser.add_argument("--test-query")

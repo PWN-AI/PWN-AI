@@ -20,14 +20,14 @@ models:
   head:
     # Choose per-role provider: local | cloud
     provider: "cloud"
-    model: "gpt-oss:120b"
+    model: "nemotron-3-super:cloud"
     temperature: 0.2 #original 0.2
     # GPT-OSS uses low/medium/high; other models may use true/false.
     reasoning: "low"
     num_ctx: 32768 #32768
   implementor:
     provider: "cloud"
-    model: "gpt-oss:120b"
+    model: "nemotron-3-super:cloud"
     temperature: 0.1
     reasoning: "low"
     num_ctx: 32768 #32768
@@ -41,7 +41,7 @@ runtime:
 rag:
   enabled: true
   database_url_env: "RAG_DATABASE_URL"
-  snapshot_path: "ai/rag/database/knowledge.json"
+  snapshot_path: "ai/rag/database/knowledge.sql"
   embedding:
     provider: "cohere"
     model: "embed-v4.0"

@@ -1,4 +1,4 @@
-"""Read tool documentation from the single versioned database snapshot."""
+"""Read tool documentation from the versioned PostgreSQL database dump."""
 from ai.rag.vector_store import DEFAULT_SNAPSHOT, read_snapshot
 
 

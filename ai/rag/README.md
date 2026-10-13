@@ -2,9 +2,13 @@
 
 PostgreSQL stores the tool documents, metadata, text-search index and 1024-dimensional
 Cohere vectors. pgvector's cosine HNSW index uses `m=16` and `ef_construction=64`.
-The Git-tracked `database/knowledge.json` is the portable database export;
-`database/001_schema.sql` recreates the schema and indexes. Live PostgreSQL files,
-passwords and API keys do not belong in Git.
+The repository contains the database as PostgreSQL SQL files:
+`database/001_schema.sql` creates the schema and indexes, and
+`database/knowledge.sql` stores every document, its actual pgvector embedding,
+and the embedding profile. There is no separate JSON knowledge file.
+GitHub stores this restorable database dump; PostgreSQL runs locally in Docker.
+Its live storage is persisted in the `rag-postgres-data` Docker volume.
+Passwords and API keys do not belong in the dump or Git.
 
 ## Setup
 
@@ -21,46 +25,79 @@ npm run build
 npm start
 ```
 
+On a fresh Docker volume, PostgreSQL automatically loads the SQL files mounted
+from the repository into `/docker-entrypoint-initdb.d`. On existing volumes,
+ingestion restores updates pulled from Git while preserving the conflict checks.
+The stored vectors are restored directly into `vector(1024)` columns and the
+HNSW index is built by PostgreSQL; Cohere is not needed to restore this database.
+
+Open the database console with:
+
+```bash
+docker compose exec rag-db psql -U pwnai -d pwnai_rag
+```
+
 Use a different `PORT` in `.env` if 3000 is occupied. The default PostgreSQL port is
 55432, bound only to localhost. If you change the database password or port,
 also change `RAG_DATABASE_URL`. Compose database initialization variables apply
 only when its volume is first created. The default password is development-only.
 
-The committed snapshot contains real Cohere vectors. Restoring an empty database
-with that matching snapshot requires **no Cohere key or embedding calls**. A new/unembedded document requires
+The versioned SQL dump contains real Cohere vectors. Restoring an empty database
+with that matching dump requires **no Cohere key or embedding calls**. A new/unembedded document requires
 `COHERE_API_KEY`. Cohere evaluation keys are free but limited, not unlimited:
 [current usage limits](https://docs.cohere.com/docs/rate-limits).
 
 ## Collaboration
 
-1. Pull the latest code and snapshot.
-2. Edit documents in `database/knowledge.json`, keeping existing IDs stable.
-   Add a document with unique `id`, `tool`, `category`, `content`,
-   `embedding: null` and `embedded_content_hash: null`. Existing documents can
-   retain their vectors/hashes while you edit their content.
+1. Pull the latest code and SQL dump, then start PostgreSQL and run ingestion.
+2. Edit documents directly in `pwnai_rag.documents` using `psql` or a database GUI.
+   Keep existing IDs stable. New documents need a unique `id`, `tool`, `category`
+   and `content`; omit the embedding and hash so ingestion generates them.
+   Existing rows can retain their vectors/hashes while you edit their content.
 3. Run `python -m ai.rag.ingest`. Only added/changed documents are embedded,
    in batches of up to 96. Deletions do not call Cohere.
-4. Commit code, schema changes and the resulting snapshot together.
+4. Commit code, schema changes and the resulting `database/knowledge.sql` together.
 5. Teammates pull and run ingestion (also done automatically at session startup).
-   Their local database imports the completed snapshot without re-embedding.
+   Their local database imports the completed dump without re-embedding.
 
-SQL edits to `pwnai_rag.documents` are also detected and exported on ingestion.
-Do not edit the synchronization metadata. If both the snapshot and local SQL
+SQL edits to `pwnai_rag.documents` are detected and exported on ingestion.
+For example, run this in the database console and then run ingestion:
+
+```sql
+INSERT INTO pwnai_rag.documents (id, tool, category, content)
+VALUES ('new-tool:overview', 'new-tool', 'overview', 'Documentation for the new tool.');
+```
+
+Do not edit the synchronization metadata. If both the SQL dump and local SQL
 database changed, ingestion stops instead of silently discarding edits.
 Back up/reconcile them before explicitly choosing `--prefer snapshot` or
-`--prefer database`; these choices replace the other side. Review JSON merge
-conflicts before ingesting. Git is versioning a portable snapshot, not making
+`--prefer database`; these choices replace the other side. Review SQL dump merge
+conflicts before ingesting. Git is versioning a restorable SQL database dump, not making
 four separate running databases automatically live-synchronized.
 
 For a genuinely shared live environment, connect all four developers to one
 managed/private PostgreSQL instance using `RAG_DATABASE_URL`, and coordinate
-snapshot exports and branch changes. Avoid using different branch snapshots
-against a shared database: an imported snapshot can replace its document rows.
+dump exports and branch changes. Avoid using different branch dumps
+against a shared database: an imported dump can replace its document rows.
 
 An advisory lock serializes ingestions; database edits are locked during sync.
-Embedding failures roll back SQL changes. Snapshot writes are atomic.
+Embedding failures roll back SQL changes. SQL dump writes are atomic.
 Changing the embedding model/profile or using `--force` re-embeds all documents.
 Changing dimensions requires a new schema/index; currently only 1024 is supported.
+
+To recreate a missing dump from the existing database, use
+`python -m ai.rag.ingest --prefer database`. For a manual restore into an **empty,
+dedicated database**, run the SQL dump with `psql`:
+
+```bash
+docker compose exec -T rag-db psql -U pwnai -d YOUR_EMPTY_DATABASE -f /docker-entrypoint-initdb.d/knowledge.sql
+```
+
+This replaces the destination's `pwnai_rag` documents and synchronization metadata;
+normal team updates should use ingestion, which checks for conflicting edits.
+The dump is PostgreSQL text `COPY` data with escaped fields, not executable
+document text. Runtime ingestion validates its format and inserts rows with
+parameterized SQL; it does not execute arbitrary SQL from the dump.
 
 ## Retrieval without embedding calls
 
