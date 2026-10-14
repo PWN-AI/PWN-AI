@@ -1,26 +1,10 @@
-"""ReAct (Reason + Act) agent for PwnAI.
-
-Implements a two-phase ReAct pattern:
-
-Phase 1 — the LLM reasons about the task, optionally requesting
-retrieval via Action/Action Input.  If the model produces the full
-trace (Thought → Action → Observation → … → final_answer) in one
-generation, we're done in a single LLM call.
-
-Phase 2 — if the model requested retrieval but did NOT produce a
-final_answer, we execute the real retrieval, feed the observations
-back as a continuation message, and let the LLM finish with a
-second call.  This handles models that pause after requesting
-retrieval instead of self-generating the observation.
-"""
+"""Stateless observation/action loop with runtime-owned RAG observations."""
 
 from __future__ import annotations
 
-import json
 import re
-import sys
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -30,7 +14,7 @@ from ai.rag.retriever import ToolRetriever
 @dataclass
 class ReActStep:
     """One step in the ReAct loop."""
-    thought: str = ""
+    assessment: str = ""
     action: str = ""
     action_input: str = ""
     observation: str = ""
@@ -57,35 +41,20 @@ RETRIEVAL_ACTIONS = {"retrieve_tool_info", "retrieve_args", "retrieve_all_tool_d
 
 
 def _build_react_instructions() -> str:
-    """Build the ReAct format instructions to prepend to prompts."""
-    action_list = "\n".join(
-        f"  - {name}: {desc}" for name, desc in AVAILABLE_ACTIONS.items()
-    )
+    actions = "\n".join(f"- {name}: {description}" for name, description in AVAILABLE_ACTIONS.items())
     return f"""
-You have access to a tool knowledge retrieval system during your reasoning.
-Use the following format to think step-by-step and retrieve information when needed:
+Use this protocol:
+Observation: concise assessment of supplied facts and documentation needed
+Action: an available action
+Action Input: the action input
 
-Thought: [Your reasoning about what to do next]
-Action: [One of the available actions below]
-Action Input: [Input for the action]
+Available actions:
+{actions}
 
-After each Action, you will receive an Observation with the results.
-Continue the Thought/Action/Observation cycle until you have enough information.
-Then provide your final answer:
-
-Thought: [Final reasoning]
-Action: final_answer
-Action Input: [Your complete JSON output]
-
-Available Actions:
-{action_list}
-
-IMPORTANT RULES:
-1. You SHOULD retrieve tool documentation when you need to know exact argument names, types, or valid values.
-2. You can make multiple retrieval calls if needed — each builds on previous observations.
-3. After retrieving, use the information to construct precise, complete arguments.
-4. Your final_answer Action Input MUST be valid JSON.
-5. Do NOT hallucinate argument names — if unsure, retrieve first.
+Request documentation before constructing a request. Stop after ONE action.
+The runtime supplies actual retrieval observations in a later message.
+Never invent retrieval observations. After receiving actual documentation,
+use Action: final_answer with the complete JSON request in Action Input.
 """
 
 
@@ -105,320 +74,88 @@ def _extract_message_text(content: Any) -> str:
 
 
 def _parse_react_output(text: str) -> ReActStep:
-    """Parse LLM output for the FIRST ReAct Thought/Action/Action Input.
-
-    Only used as a fallback — prefer _parse_all_react_steps() for full
-    output parsing.
-    """
-    step = ReActStep()
-
-    thought_match = re.search(
-        r"Thought\s*:\s*(.*?)(?=\nAction\s*:|$)",
-        text, re.DOTALL | re.IGNORECASE,
+    """Read the first action only, discarding model-invented continuations."""
+    action = re.search(r"(?im)^Action:\s*([\w_]+)\s*$", text)
+    if not action:
+        return ReActStep()
+    assessment = re.search(r"(?is)^Observation:\s*(.+)", text[:action.start()].strip())
+    after_action = text[action.end():]
+    action_input = re.search(
+        r"(?ims)^Action Input:\s*(.*?)(?=^Observation:|^Thought:|^Action:|\Z)", after_action)
+    return ReActStep(
+        assessment=assessment.group(1).strip() if assessment else "",
+        action=action.group(1).lower(),
+        action_input=action_input.group(1).strip() if action_input else "",
     )
-    if thought_match:
-        step.thought = thought_match.group(1).strip()
-
-    action_match = re.search(
-        r"Action\s*:\s*([\w_]+)",
-        text, re.IGNORECASE,
-    )
-    if action_match:
-        step.action = action_match.group(1).strip()
-
-    input_match = re.search(
-        r"Action\s+Input\s*:\s*(.*?)(?=\nThought\s*:|\nObservation\s*:|$)",
-        text, re.DOTALL | re.IGNORECASE,
-    )
-    if input_match:
-        step.action_input = input_match.group(1).strip()
-
-    return step
-
-
-def _parse_all_react_steps(text: str) -> List[ReActStep]:
-    """Parse ALL ReAct steps from a single LLM generation.
-
-    Models often produce the entire Thought/Action/Observation/...
-    /final_answer trace in one shot.  This function extracts every
-    step so we can execute retrieval actions AND capture the
-    final_answer from the same output.
-
-    Strategy: find every ``Action:`` occurrence and work backwards to
-    grab the preceding ``Thought:`` (if any) and forwards to grab the
-    ``Action Input:`` and ``Observation:``.  This avoids losing actions
-    that appear without a ``Thought:`` prefix.
-    """
-    steps: List[ReActStep] = []
-
-    # Find all Action positions
-    action_iter = list(re.finditer(
-        r"Action\s*:\s*([\w_]+)",
-        text, re.IGNORECASE,
-    ))
-
-    if not action_iter:
-        # No actions at all — try to build a single step from any Thought
-        thought_match = re.search(
-            r"Thought\s*:\s*(.*)",
-            text, re.DOTALL | re.IGNORECASE,
-        )
-        if thought_match:
-            steps.append(ReActStep(thought=thought_match.group(1).strip()))
-        return steps
-
-    for idx, action_match in enumerate(action_iter):
-        step = ReActStep()
-        step.action = action_match.group(1).strip()
-
-        # Determine the text region for this action:
-        # from the previous action's end (or start of text) to the next action's start (or end of text)
-        region_start = action_iter[idx - 1].end() if idx > 0 else 0
-        region_end = action_iter[idx + 1].start() if idx + 1 < len(action_iter) else len(text)
-        region = text[region_start:region_end]
-
-        # Look for Thought: before this Action within the region
-        thought_match = re.search(
-            r"Thought\s*:\s*(.*?)(?=\nAction\s*:|$)",
-            region, re.DOTALL | re.IGNORECASE,
-        )
-        if thought_match:
-            step.thought = thought_match.group(1).strip()
-
-        # Look for Action Input: after this Action within the region
-        # Use text from the Action match position onwards
-        after_action = text[action_match.end():region_end]
-        input_match = re.search(
-            r"Input\s*:\s*(.*?)(?=\nThought\s*:|\nObservation\s*:|\nAction\s*:|$)",
-            after_action, re.DOTALL | re.IGNORECASE,
-        )
-        if input_match:
-            step.action_input = input_match.group(1).strip()
-
-        # Look for Observation: in the region after action input
-        obs_match = re.search(
-            r"Observation\s*:\s*(.*?)(?=\nThought\s*:|\nAction\s*:|$)",
-            after_action, re.DOTALL | re.IGNORECASE,
-        )
-        if obs_match:
-            step.observation = obs_match.group(1).strip()
-
-        steps.append(step)
-
-    return steps
-
-
-def _try_extract_json_from_text(text: str) -> Optional[str]:
-    """Attempt to extract JSON from raw text that doesn't follow ReAct format.
-
-    Fallback for models that skip the ReAct format and just output JSON.
-    """
-    # Try to find a JSON object in the text
-    brace_depth = 0
-    start = -1
-    for i, ch in enumerate(text):
-        if ch == '{':
-            if brace_depth == 0:
-                start = i
-            brace_depth += 1
-        elif ch == '}':
-            brace_depth -= 1
-            if brace_depth == 0 and start >= 0:
-                candidate = text[start:i + 1]
-                try:
-                    json.loads(candidate)
-                    return candidate
-                except json.JSONDecodeError:
-                    start = -1
-    return None
-
-
-def _process_steps(
-    steps: List[ReActStep],
-    retriever: ToolRetriever,
-    label: str,
-    retrieved_contexts: List[str],
-) -> Tuple[Optional[str], List[Tuple[ReActStep, str]]]:
-    """Walk parsed steps: log thoughts, execute retrievals, find final_answer.
-
-    Returns (final_output_or_None, list_of_(step, observation)_pairs).
-    """
-    final_output: Optional[str] = None
-    retrieval_results: List[Tuple[ReActStep, str]] = []
-
-    for step in steps:
-        if step.thought:
-            print(f"[{label}] Thought: {step.thought}")
-
-        if step.action == "final_answer":
-            final_output = step.action_input
-            print(f"[{label}] Final answer captured.")
-
-        elif step.action in RETRIEVAL_ACTIONS:
-            try:
-                observation = _execute_retrieval(step, retriever, label)
-            except Exception as exc:
-                print(f"[{label}] Retrieval failed ({step.action}): {exc}", file=sys.stderr)
-                observation = f"[retrieval unavailable: {exc}]"
-            retrieved_contexts.append(observation)
-            retrieval_results.append((step, observation))
-
-    return final_output, retrieval_results
 
 
 def run_react_loop(
-    *,
-    llm: Any,
-    system_prompt: str,
-    user_message: str,
-    retriever: ToolRetriever,
-    label: str = "ReAct",
+    *, llm: Any, system_prompt: str, user_message: str,
+    retriever: ToolRetriever, label: str = "ReAct", max_iterations: int = 3,
+    trace_sink: Optional[List[Dict[str, Any]]] = None,
 ) -> ReActResult:
-    """Execute a ReAct flow with RAG retrieval (up to 2 LLM calls).
+    """Execute actual retrieval before accepting a final answer.
 
-    Phase 1: The LLM reasons about the task, optionally requesting
-    retrieval.  If the model produces the complete trace (including
-    final_answer) in one generation, we return immediately.
-
-    Phase 2: If the model requested retrieval but did NOT produce a
-    final_answer, we execute the real retrieval, feed the observations
-    back, and let the model finish with a second call.
-
-    Args:
-        llm: LangChain-compatible LLM (with .invoke() method)
-        system_prompt: Base system prompt for the agent
-        user_message: The user/task message to reason about
-        retriever: ToolRetriever for RAG queries
-        label: Label for logging
-
-    Returns:
-        ReActResult with the final output and reasoning trace
+    Only the first action in a generation executes. Model-generated observations
+    or answers following retrieval are discarded. Messages persist only here.
     """
-    react_instructions = _build_react_instructions()
-    full_system = system_prompt + "\n\n" + react_instructions
-    retrieved_contexts: List[str] = []
-    all_steps: List[ReActStep] = []
-    total_calls = 0
-
-    # ── Phase 1: Initial LLM call ──────────────────────────────────
-    print(f"\n[{label}] Reasoning...")
-
-    try:
-        response = llm.invoke([
-            SystemMessage(content=full_system),
-            HumanMessage(content=user_message),
-        ])
+    if max_iterations < 2:
+        raise ValueError("max_iterations must allow retrieval and a final response (>=2).")
+    messages = [SystemMessage(content=system_prompt + "\n" + _build_react_instructions() +
+                              f"\nYou have at most {max_iterations} model calls, including the final request."),
+                HumanMessage(content=user_message)]
+    contexts: List[str] = []
+    steps: List[ReActStep] = []
+    for call in range(1, max_iterations + 1):
+        response = llm.invoke(messages)
         text = _extract_message_text(getattr(response, "content", response))
-        total_calls += 1
-    except Exception as exc:
-        print(f"[{label}] LLM call failed: {exc}", file=sys.stderr)
-        return ReActResult(final_output="{}", steps=[], total_llm_calls=1)
-
-    # Show full Phase 1 output
-    print(f"\n{'='*60}")
-    print(f"[{label}] Phase 1 output")
-    print(f"{'='*60}")
-    print(text)
-    print(f"{'='*60}")
-
-    steps = _parse_all_react_steps(text)
-    all_steps.extend(steps)
-
-    final_output, retrieval_results = _process_steps(
-        steps, retriever, label, retrieved_contexts,
-    )
-
-    if final_output:
-        return ReActResult(
-            final_output=final_output,
-            steps=all_steps,
-            total_llm_calls=total_calls,
-            retrieved_context=retrieved_contexts,
-        )
-
-    # ── Phase 2: Feed real observations back ───────────────────────
-    # The model requested retrieval but didn't produce final_answer.
-    # Execute retrievals and give the model a second chance.
-    if retrieval_results:
-        print(f"\n[{label}] No final_answer in phase 1 — feeding retrieval results back...")
-
-        observation_block = "\n\n".join(
-            f"Observation (for query \"{step.action_input}\"):\n{obs}"
-            for step, obs in retrieval_results
-        )
-        continuation = (
-            f"Here are the actual results from your retrieval request(s):\n\n"
-            f"{observation_block}\n\n"
-            f"Now use the retrieved information to produce your final answer.\n"
-            f"Respond ONLY with:\n"
-            f"Thought: [your reasoning using the retrieved information]\n"
-            f"Action: final_answer\n"
-            f"Action Input: [your complete JSON output]"
-        )
-
-        try:
-            response2 = llm.invoke([
-                SystemMessage(content=full_system),
-                HumanMessage(content=user_message),
-                AIMessage(content=text),
-                HumanMessage(content=continuation),
+        step = _parse_react_output(text)
+        if not step.assessment or not step.action_input:
+            if trace_sink is not None:
+                trace_sink.append({"call": call, "assessment": step.assessment,
+                                   "action": step.action, "action_input": step.action_input,
+                                   "error": "Missing observation or action input."})
+            messages.append(HumanMessage(content="Use Observation:, Action:, and Action Input: with nonempty values."))
+            continue
+        if step.action in RETRIEVAL_ACTIONS:
+            event = {"call": call, "assessment": step.assessment, "action": step.action,
+                     "action_input": step.action_input}
+            if trace_sink is not None:
+                trace_sink.append(event)
+            print(f"[{label}] Action: {step.action}", flush=True)
+            try:
+                observation = _execute_retrieval(step, retriever, label)
+                if not observation or not observation.strip():
+                    raise RuntimeError("RAG returned no documentation.")
+            except Exception as exc:
+                event["error"] = str(exc)
+                raise
+            step.observation = observation
+            event["retrieval_observation"] = observation
+            print(f"[{label}] Retrieval done.", flush=True)
+            contexts.append(observation)
+            steps.append(step)
+            messages.extend([
+                AIMessage(content=f"Observation: {step.assessment}\nAction: {step.action}\nAction Input: {step.action_input}"),
+                HumanMessage(content=f"Observation: {observation}\nUse this actual documentation to decide the next action."),
             ])
-            text2 = _extract_message_text(getattr(response2, "content", response2))
-            total_calls += 1
-
-            print(f"\n{'='*60}")
-            print(f"[{label}] Phase 2 output")
-            print(f"{'='*60}")
-            print(text2)
-            print(f"{'='*60}")
-
-            steps2 = _parse_all_react_steps(text2)
-            all_steps.extend(steps2)
-
-            final_output2, _ = _process_steps(
-                steps2, retriever, label, retrieved_contexts,
-            )
-
-            if final_output2:
-                return ReActResult(
-                    final_output=final_output2,
-                    steps=all_steps,
-                    total_llm_calls=total_calls,
-                    retrieved_context=retrieved_contexts,
-                )
-
-            # Try JSON extraction from Phase 2 text
-            json_candidate = _try_extract_json_from_text(text2)
-            if json_candidate:
-                print(f"[{label}] JSON extracted from phase 2 output.")
-                return ReActResult(
-                    final_output=json_candidate,
-                    steps=all_steps,
-                    total_llm_calls=total_calls,
-                    retrieved_context=retrieved_contexts,
-                )
-        except Exception as exc:
-            print(f"[{label}] Phase 2 LLM call failed: {exc}", file=sys.stderr)
-
-    # ── Fallback: extract JSON from Phase 1 text ──────────────────
-    print(f"[{label}] No final_answer found. Attempting JSON extraction from raw output...")
-    json_candidate = _try_extract_json_from_text(text)
-    if json_candidate:
-        print(f"[{label}] JSON extracted from raw output.")
-        return ReActResult(
-            final_output=json_candidate,
-            steps=all_steps,
-            total_llm_calls=total_calls,
-            retrieved_context=retrieved_contexts,
-        )
-
-    print(f"[{label}] Could not extract any usable output.")
-    return ReActResult(
-        final_output="{}",
-        steps=all_steps,
-        total_llm_calls=total_calls,
-        retrieved_context=retrieved_contexts,
-    )
+        elif step.action == "final_answer" and contexts:
+            if trace_sink is not None:
+                trace_sink.append({"call": call, "assessment": step.assessment,
+                                   "action": step.action, "action_input": step.action_input})
+            print(f"[{label}] Observation: {step.assessment}", flush=True)
+            steps.append(step)
+            return ReActResult(step.action_input, steps, call, contexts)
+        else:
+            if trace_sink is not None:
+                trace_sink.append({"call": call, "assessment": step.assessment,
+                                   "action": step.action, "action_input": step.action_input,
+                                   "error": "Unsupported action or final request before real retrieval."})
+            messages.append(HumanMessage(content=(
+                "Observe the handoff, then request RAG using Action and Action Input. "
+                "You must receive real documentation before final_answer. "
+                "Only one action per response; never generate retrieval observations.")))
+    raise RuntimeError(f"{label} did not produce a grounded request within {max_iterations} calls.")
 
 
 def _execute_retrieval(step: ReActStep, retriever: ToolRetriever, label: str) -> str:

@@ -16,6 +16,7 @@ class SessionState(TypedDict, total=False):
     max_replans: int
     max_new_tasks_per_replan: int
 
+    prepared_requests: Dict[str, Dict[str, Any]]
     tasks: List[TaskSpec]
     task_index: int
     current_task: Optional[TaskSpec]
@@ -26,8 +27,9 @@ class SessionState(TypedDict, total=False):
     runs: List[TaskRunRecord]
     findings: List[Finding]
     notes: List[str]
-    llm_notes: List[str]        # observations written by the LLM after each task
+    llm_notes: List[str]        # head-only session memory, including the initial observation
     planning_trace: List[str]
+    head_iterations: List[Dict[str, Any]]  # Full public observation + RAG records; head only.
     replan_count: int
     stop_reason: str
     finished: bool

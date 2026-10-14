@@ -27,13 +27,13 @@ models:
     num_ctx: 32768 #32768
   implementor:
     provider: "cloud"
-    model: "glm-4.7"
+    model: "gemma4:31b-cloud"
     temperature: 0.1
     reasoning: false
     num_ctx: 32768 #32768
   embedding:
-    provider: "cloud"
-    model: "gemma4:31b-cloud"
+    provider: "local"
+    model: "nomic-embed-text:latest"
 
 # make the embedding local to save API cost when presenting
 # model: nomic-embed-text:latest
@@ -49,8 +49,7 @@ runtime:
 rag:
   enabled: true
   persist_dir: "ai/rag/index"
-  # Maximum ReAct iterations for head planner (plan/replan)
-  max_react_iterations_head: 4
+  # The head is observation-only and has no retrieval loop.
   # Maximum ReAct iterations for implementor
   max_react_iterations_impl: 3
 

@@ -28,11 +28,11 @@ class ToolRetriever:
         Returns a formatted string suitable for LLM consumption.
         """
         if not self.store.is_ready:
-            return "[RAG] Knowledge base not initialized. Using pretrained knowledge only."
+            raise RuntimeError("RAG knowledge base not initialized.")
 
         results = self.store.search(query, top_k=top_k, tool_filter=tool_filter)
         if not results:
-            return f"[RAG] No relevant documentation found for: {query}"
+            raise LookupError(f"No relevant documentation found for: {query}")
 
         parts: List[str] = []
         parts.append(f"=== Retrieved Tool Documentation ({len(results)} results) ===")
@@ -51,14 +51,14 @@ class ToolRetriever:
     def retrieve_all_for_tool(self, tool_name: str) -> str:
         """Retrieve ALL documentation for a specific tool."""
         if not self.store.is_ready:
-            return "[RAG] Knowledge base not initialized."
+            raise RuntimeError("RAG knowledge base not initialized.")
 
         docs = [
             doc for doc in self.store._documents
             if doc["tool"] == tool_name
         ]
         if not docs:
-            return f"[RAG] No documentation found for tool: {tool_name}"
+            raise LookupError(f"No documentation found for tool: {tool_name}")
 
         parts: List[str] = [f"=== Complete Documentation for {tool_name} ==="]
         for doc in docs:

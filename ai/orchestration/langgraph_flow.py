@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from langgraph.graph import END, START, StateGraph
 
-from ai.agents.head_qwen3_8b.planner import HeadPlanner
-from ai.agents.implementor_qwen25coder_7b.compiler import ImplementorCompiler
+from ai.agents.head.planner import HeadPlanner
+from ai.agents.implementor.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
 from ai.contracts.schemas import ActionDecision, ExecutionResult, Finding, TargetSpec, TaskRunRecord, TaskSpec, ToolRequest
 from ai.execution.auth import refresh_session_cookie
@@ -28,6 +28,37 @@ def build_phase1_graph(
 ) -> StateGraph:
     graph = StateGraph(SessionState)
 
+    def _compile_handoff(decision: HeadPlanner.PlannerDecision, state: SessionState,
+                         task_id: str) -> tuple[List[TaskSpec], Dict[str, Dict[str, Any]], Dict[str, Any]]:
+        iteration = {
+            "observations": list(decision.observations),
+            "observation_summary": decision.observation_summary,
+            "next_step": decision.handoff.next_step if decision.handoff else decision.stop_reason,
+            "memory_notes": list(decision.task_notes),
+            "decision": "stop" if decision.should_stop else "continue",
+            "task_id": task_id,
+            "implementor_steps": [],
+        }
+        if decision.should_stop or decision.handoff is None:
+            return [], {}, iteration
+        try:
+            request = implementor.compile(handoff=decision.handoff, user_goal=state["user_goal"],
+                                          task_id=task_id, trace_sink=iteration["implementor_steps"])
+            iteration["tool_request"] = request.model_dump()
+            task = TaskSpec(
+                id=task_id, title=decision.handoff.next_step, objective=decision.handoff.next_step,
+                rationale=decision.handoff.observation_summary, tool_hint=request.tool_name,
+                action_hint=request.action, target_mode=request.target_mode,
+                target=request.target, args=request.args,
+            )
+        except Exception as exc:
+            decision.should_stop = True
+            decision.stop_reason = f"Implementor could not produce a grounded request: {exc}"
+            decision.thinking_summary.append(decision.stop_reason)
+            iteration["compilation_error"] = decision.stop_reason
+            return [], {}, iteration
+        return [task], {task_id: request.model_dump()}, iteration
+
     def _task_signature(task: TaskSpec) -> str:
         args_blob = json.dumps(task.args, sort_keys=True, ensure_ascii=True)
         target_blob = json.dumps(task.target.model_dump(), sort_keys=True, ensure_ascii=True)
@@ -38,7 +69,7 @@ def build_phase1_graph(
         print(f"[Head Planner] {title}")
         print(f"{'='*60}")
         if summary:
-            print("  Thinking:")
+            print("  Observations:")
             for line in summary:
                 print(f"    > {line}")
         if tasks:
@@ -47,8 +78,6 @@ def build_phase1_graph(
                 target_str = task.target.url or task.target.request_file or "?"
                 print(f"    [{task.id}] {task.tool_hint}/{task.action_hint} -> {target_str}")
                 print(f"           {task.title} (P{task.priority})")
-        else:
-            print("  No tasks generated.")
         print(f"{'='*60}")
 
     def _inject_auth_cookie(request: ToolRequest, state: SessionState) -> ToolRequest:
@@ -159,8 +188,8 @@ def build_phase1_graph(
             operator_context=operator_context,
             max_tasks=1,
         )
-        tasks = decision.tasks
-        _print_head_trace("Initial Plan", decision.thinking_summary, tasks)
+        _print_head_trace("Initial Plan", decision.thinking_summary, [])
+        tasks, prepared_requests, iteration = _compile_handoff(decision, state, "task-01")
         existing_notes = list(state.get("notes", []))
         planning_trace = list(state.get("planning_trace", []))
         planning_trace.append("Initial plan: " + " | ".join(decision.thinking_summary))
@@ -172,8 +201,10 @@ def build_phase1_graph(
             "runs": [],
             "findings": [],
             "notes": existing_notes,
-            "llm_notes": [],
+            "llm_notes": list(decision.task_notes),
+            "prepared_requests": prepared_requests,
             "planning_trace": planning_trace,
+            "head_iterations": [iteration],
             "replan_count": 0,
             "finished": len(tasks) == 0,
             "stop_reason": decision.stop_reason if decision.should_stop else "",
@@ -193,11 +224,7 @@ def build_phase1_graph(
         current_task = state.get("current_task")
         if current_task is None:
             return {"current_request": None}
-        request = implementor.compile(
-            task=current_task,
-            user_goal=state["user_goal"],
-            operator_context=state.get("operator_context", {}),
-        )
+        request = ToolRequest.model_validate(state["prepared_requests"][current_task.id])
         request = _inject_auth_cookie(request, state)
         return {"current_request": request}
 
@@ -259,6 +286,8 @@ def build_phase1_graph(
                 updated_state["operator_context"] = operator_context
                 current_request = _inject_auth_cookie(current_request, updated_state)  # type: ignore[arg-type]
 
+        print(f"[Implementor] Execute tool: {current_request.tool_name}/{current_request.action} "
+              f"| task={current_request.task_id}", flush=True)
         result = run_manager.execute(current_request)
 
         # --- SESSION-EXPIRY DETECTION (informational only) ---
@@ -370,12 +399,20 @@ def build_phase1_graph(
             prior_notes=llm_notes,
             replan_iteration=replan_count,
             max_new_tasks=max_new_tasks,
+            iteration_history=state.get("head_iterations", []),
+            execution_history=[run.model_dump() for run in state.get("runs", [])],
+            runtime_notes=notes,
         )
         _print_head_trace(
             f"Adaptive Re-plan #{replan_count + 1} (after {current_task.id})",
             decision.thinking_summary,
-            decision.tasks,
+            [],
         )
+        produced_tasks, new_requests, iteration = _compile_handoff(
+            decision, state, f"task-{len(tasks) + 1:02d}")
+        head_iterations = list(state.get("head_iterations", [])) + [iteration]
+        prepared_requests = dict(state.get("prepared_requests", {}))
+        prepared_requests.update(new_requests)
         planning_trace.append(f"Re-plan #{replan_count + 1}: " + " | ".join(decision.thinking_summary))
         # Accumulate the LLM's own notes about this task's result.
         if decision.task_notes:
@@ -384,7 +421,7 @@ def build_phase1_graph(
 
         existing_signatures = {_task_signature(task) for task in tasks}
         appended_tasks: List[TaskSpec] = []
-        for task in decision.tasks:
+        for task in produced_tasks:
             sig = _task_signature(task)
             if sig in existing_signatures:
                 continue
@@ -393,7 +430,7 @@ def build_phase1_graph(
                 break
             new_idx = len(tasks) + len(appended_tasks) + 1
             appended_tasks.append(
-                task.model_copy(update={"id": f"task-{new_idx:02d}", "priority": new_idx})
+                task.model_copy(update={"id": f"task-{new_idx:02d}", "priority": min(new_idx, 10)})
             )
             existing_signatures.add(sig)
 
@@ -414,6 +451,8 @@ def build_phase1_graph(
                 "llm_notes": llm_notes,
                 "planning_trace": planning_trace,
                 "replan_count": replan_count + 1,
+                "prepared_requests": prepared_requests,
+                "head_iterations": head_iterations,
             }
 
         return {
@@ -424,6 +463,8 @@ def build_phase1_graph(
             "llm_notes": llm_notes,
             "planning_trace": planning_trace,
             "replan_count": replan_count + 1,
+            "prepared_requests": prepared_requests,
+            "head_iterations": head_iterations,
             "stop_reason": state.get("stop_reason", ""),
         }
 

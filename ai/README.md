@@ -5,7 +5,8 @@ This is the Phase 1 implementation for the AI layer:
   - Head LLM: `qwen3:8b`
   - Implementor LLM: `qwen2.5-coder:7b`
 - LangGraph orchestration loop
-- No RAG
+- Head observes in prose and retains session memory; it has no RAG or JSON output
+- Stateless implementor observes each handoff, retrieves actual tool documentation, and builds one JSON request
 - Per-action permission prompt via `ActionFilter`
 - No API and no background workers in this phase
 
@@ -98,8 +99,30 @@ ollama:
 
 ## Notes
 
-1. Phase 1 intentionally skips RAG.
+1. RAG must be enabled and available. Missing retrieval or invalid agent output stops execution rather than generating a guessed fallback action.
 2. If credentials are provided with URL mode, the runner attempts pre-auth and injects the session cookie into tool requests.
 3. Every action asks operator approval unless `--auto-approve` is set.
 4. Reports are written to `artifacts/phase1/`.
 5. Head-planner reasoning summaries are printed in terminal and written under `Head Planner Trace` in the report.
+
+## Observation and action flow
+
+The head emits multiple `Observation` evidence assessments, then `Summary`, `Next step`,
+`Memory note`, and `Decision` prose sections. These are public decision summaries, not
+private internal chain-of-thought. Only the head receives accumulated memory notes,
+complete observation records, implementor RAG traces, all attempted requests and execution
+outputs/results, runtime notes, and findings. `head_iterations` retains each iteration's
+observations, summary, objective, memory notes, and implementor actions in session state.
+The implementor receives a fresh handoff containing `observation_summary`, `next_step`, original
+target URL/request file, discovered endpoints, authentication status/cookie, navigation, and
+a page sample. Relevant remembered facts must be included explicitly by the head.
+
+Each implementor call runs its own bounded observation/action loop. Retrieval actions execute
+in the runtime; results return in the next model call before a final JSON request can be accepted.
+Each accepted assessment/action and real RAG result is recorded in session state. During
+retrieval, session output shows only the action, retrieval progress, and completion message;
+retrieved document text is not printed. The implementor can request additional documentation before submitting one executable
+tool request. Actual execution remains in the runtime, and its complete results return to the head.
+Model-generated retrieval observations and answers following a retrieval in the same response
+are discarded. `rag.max_react_iterations_impl` bounds calls and must be at least two.
+The existing approval, execution, cookie refresh, analysis, and reporting stages remain in place.

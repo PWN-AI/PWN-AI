@@ -6,8 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict
 
-from ai.agents.head_qwen3_8b.planner import HeadPlanner
-from ai.agents.implementor_qwen25coder_7b.compiler import ImplementorCompiler
+from ai.agents.head.planner import HeadPlanner
+from ai.agents.implementor.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
 from ai.config.env_loader import load_project_env
 from ai.execution.auth import attempt_pre_auth
@@ -113,18 +113,20 @@ def run_session(args: argparse.Namespace) -> SessionState:
             print(f"[RAG] Tool knowledge base initialized ({store._index.ntotal} vectors).")
         except Exception as exc:
             print(f"[RAG] WARNING: Failed to initialize RAG: {exc}")
-            print("[RAG] Continuing without RAG retrieval (LLMs will use pretrained knowledge only).")
-            retriever = None
+            raise RuntimeError("Implementor cannot run without RAG documentation.") from exc
+
+    if retriever is None:
+        raise RuntimeError("RAG must be enabled for the observation/action implementor.")
 
     planner = HeadPlanner(
         llm=head_llm,
-        prompt_path=project_root / "ai" / "agents" / "head_qwen3_8b" / "system_prompt.md",
-        retriever=retriever,
+        prompt_path=project_root / "ai" / "agents" / "head" / "system_prompt.md",
     )
     compiler = ImplementorCompiler(
         llm=impl_llm,
-        prompt_path=project_root / "ai" / "agents" / "implementor_qwen25coder_7b" / "system_prompt.md",
+        prompt_path=project_root / "ai" / "agents" / "implementor" / "system_prompt.md",
         retriever=retriever,
+        max_iterations=int(rag_cfg.get("max_react_iterations_impl", 3)),
     )
     action_filter = ActionFilter(
         ask_permission=bool(cfg.get("runtime", {}).get("ask_permission_per_action", True)),
@@ -233,7 +235,8 @@ def run_session(args: argparse.Namespace) -> SessionState:
         "max_new_tasks_per_replan": max_new_tasks_per_replan,
         "notes": notes,
     }
-    final_state = app.invoke(initial_state)
+    # Each task crosses seven graph nodes; allow the configured adaptive budget.
+    final_state = app.invoke(initial_state, config={"recursion_limit": 10 + 8 * (max_replans + 1)})
     return final_state
 
 
@@ -254,7 +257,7 @@ def main() -> None:
         for key, value in final_state.items():
             if isinstance(value, list):
                 serializable[key] = [
-                    item.model_dump() if hasattr(item, "model_dump") else str(item)
+                    item.model_dump() if hasattr(item, "model_dump") else item
                     for item in value
                 ]
             elif hasattr(value, "model_dump"):
