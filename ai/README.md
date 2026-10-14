@@ -5,7 +5,7 @@ This is the Phase 1 implementation for the AI layer:
   - Head LLM: `qwen3:8b`
   - Implementor LLM: `qwen2.5-coder:7b`
 - LangGraph orchestration loop
-- Head observes in prose and retains session memory; it has no RAG or JSON output
+- Head performs bounded candidate search and per-attempt/session reflection; it has no retrieval or execution tools
 - Stateless implementor observes each handoff, retrieves actual tool documentation, and builds one JSON request
 - Per-action permission prompt via `ActionFilter`
 - No API and no background workers in this phase
@@ -107,15 +107,45 @@ ollama:
 
 ## Observation and action flow
 
-The head emits multiple `Observation` evidence assessments, then `Summary`, `Next step`,
-`Memory note`, and `Decision` prose sections. These are public decision summaries, not
-private internal chain-of-thought. Only the head receives accumulated memory notes,
-complete observation records, implementor RAG traces, all attempted requests and execution
-outputs/results, runtime notes, and findings. `head_iterations` retains each iteration's
-observations, summary, objective, memory notes, and implementor actions in session state.
-The implementor receives a fresh handoff containing `observation_summary`, `next_step`, original
-target URL/request file, discovered endpoints, authentication status/cookie, navigation, and
-a page sample. Relevant remembered facts must be included explicitly by the head.
+The head uses phase-specific, validated planning JSON. These records contain public
+evidence assessments and decisions, not private internal chain-of-thought:
+
+1. **Propose:** initially generate two or three distinct candidate objectives. On later
+   calls, use branching for uncertainty, failure, or stalled progress; one direct objective
+   is allowed after verified progress. Each candidate carries its evidence references,
+   prerequisites, expected information, a self-contained summary, and up to two conditional
+   followups. Lookahead is limited to the immediate objective plus one hypothetical level.
+2. **Evaluate:** a separate model call rates every candidate's evidence strength,
+   information gain, goal alignment, and cost. The runtime prunes/defers unsuitable options,
+   blocks unmet prerequisites, and selects one viable candidate by ordinal score:
+   `2 * evidence_strength + information_gain + goal_alignment - cost`. Scores are not
+   success probabilities. The working frontier holds at most six candidates; retained
+   alternatives are reassessed against current evidence during branching. Reconsidering
+   a plan never rolls back changes to the target environment.
+3. **Execute:** only the selected `observation_summary` and `next_step`, original target,
+   and current application context go to the existing stateless implementor. It receives
+   no candidate tree or full head history. Authentication, discovered endpoints,
+   navigation, and a page sample remain available as before.
+4. **Reflect:** after every approved/denied execution, the head records evidence references,
+   outcome category, lesson, next adjustment, retry condition, and whether verified progress
+   occurred. Compilation failures are also recorded before final reporting. Execution
+   errors, missing documentation, failed authentication, timeouts, completed negative tests,
+   and positive findings are distinguished. If reflection fails, a runtime record preserves
+   uncertainty instead of inventing a lesson or successful result.
+5. **Consolidate:** every exit, including attempt-limit exits, produces a session assessment.
+   The runtime attaches the original attempt lessons unchanged to the Markdown report and
+   `<session_id>_feedback.json` in the output directory. Later sessions recall at most 20
+   validated lessons from the 10 most recent feedback artifacts, scoped to the exact same
+   target and goal. Historical feedback is guidance, not proof of the current target state.
+
+Only the head receives full iteration history, actual execution results, implementor RAG
+traces, findings, runtime notes, and retained feedback. `head_iterations` stores search and
+implementor traces; `candidate_frontier`, `task_candidates`, `attempt_reflections`, and
+`session_reflection` retain the planning/feedback state. There are no model-weight updates.
+Each structured phase allows one correction for invalid output. An invalid proposal or
+review stops executable handoffs. The existing `max_replans` bounds real attempts; each
+planning decision takes proposal + review calls, each attempt adds a reflection call, and
+session end adds a consolidation call (plus at most one correction per phase).
 
 Each implementor call runs its own bounded observation/action loop. Retrieval actions execute
 in the runtime; results return in the next model call before a final JSON request can be accepted.

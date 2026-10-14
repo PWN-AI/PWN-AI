@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from langgraph.graph import END, START, StateGraph
 
 from ai.agents.head.planner import HeadPlanner
+from ai.agents.head.memory import load_feedback
 from ai.agents.implementor.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
 from ai.contracts.schemas import ActionDecision, ExecutionResult, Finding, TargetSpec, TaskRunRecord, TaskSpec, ToolRequest
@@ -38,6 +39,8 @@ def build_phase1_graph(
             "decision": "stop" if decision.should_stop else "continue",
             "task_id": task_id,
             "implementor_steps": [],
+            "selected_candidate_id": decision.selected_candidate_id,
+            "search_trace": decision.search_trace,
         }
         if decision.should_stop or decision.handoff is None:
             return [], {}, iteration
@@ -182,11 +185,13 @@ def build_phase1_graph(
         # Plan ONE task at a time — the planner picks the single most
         # important next step, executes it, observes the output, then
         # the re-planner decides what to do next.
+        prior_session_feedback = load_feedback(Path(state["output_dir"]), state["target"], state["user_goal"])
         decision = planner.plan(
             user_goal=state["user_goal"],
             target=target,
             operator_context=operator_context,
             max_tasks=1,
+            prior_session_feedback=prior_session_feedback,
         )
         _print_head_trace("Initial Plan", decision.thinking_summary, [])
         tasks, prepared_requests, iteration = _compile_handoff(decision, state, "task-01")
@@ -205,6 +210,10 @@ def build_phase1_graph(
             "prepared_requests": prepared_requests,
             "planning_trace": planning_trace,
             "head_iterations": [iteration],
+            "candidate_frontier": decision.candidate_frontier,
+            "task_candidates": {task.id: decision.selected_candidate_id for task in tasks},
+            "attempt_reflections": [],
+            "prior_session_feedback": prior_session_feedback,
             "replan_count": 0,
             "finished": len(tasks) == 0,
             "stop_reason": decision.stop_reason if decision.should_stop else "",
@@ -288,7 +297,12 @@ def build_phase1_graph(
 
         print(f"[Implementor] Execute tool: {current_request.tool_name}/{current_request.action} "
               f"| task={current_request.task_id}", flush=True)
-        result = run_manager.execute(current_request)
+        try:
+            result = run_manager.execute(current_request)
+        except Exception as exc:
+            result = ExecutionResult(
+                tool_name=current_request.tool_name, action=current_request.action,
+                success=False, returncode=1, error=str(exc), stderr=str(exc))
 
         # --- SESSION-EXPIRY DETECTION (informational only) ---
         # The system authenticates once at session start and reuses that
@@ -386,6 +400,7 @@ def build_phase1_graph(
                 "llm_notes": llm_notes,
                 "planning_trace": planning_trace,
                 "replan_count": replan_count,
+                "stop_reason": "Reached max re-plan limit.",
             }
 
         decision = planner.replan(
@@ -402,6 +417,9 @@ def build_phase1_graph(
             iteration_history=state.get("head_iterations", []),
             execution_history=[run.model_dump() for run in state.get("runs", [])],
             runtime_notes=notes,
+            candidate_frontier=state.get("candidate_frontier", []),
+            reflections=state.get("attempt_reflections", []),
+            prior_session_feedback=state.get("prior_session_feedback", []),
         )
         _print_head_trace(
             f"Adaptive Re-plan #{replan_count + 1} (after {current_task.id})",
@@ -413,6 +431,7 @@ def build_phase1_graph(
         head_iterations = list(state.get("head_iterations", [])) + [iteration]
         prepared_requests = dict(state.get("prepared_requests", {}))
         prepared_requests.update(new_requests)
+        task_candidates = dict(state.get("task_candidates", {}))
         planning_trace.append(f"Re-plan #{replan_count + 1}: " + " | ".join(decision.thinking_summary))
         # Accumulate the LLM's own notes about this task's result.
         if decision.task_notes:
@@ -424,6 +443,7 @@ def build_phase1_graph(
         for task in produced_tasks:
             sig = _task_signature(task)
             if sig in existing_signatures:
+                notes.append(f"Skipped repeated executable request for {task.id}; no new action executed.")
                 continue
             if len(tasks) + len(appended_tasks) >= max_total_tasks:
                 notes.append("Adaptive tasks skipped because max task cap was reached.")
@@ -432,6 +452,7 @@ def build_phase1_graph(
             appended_tasks.append(
                 task.model_copy(update={"id": f"task-{new_idx:02d}", "priority": min(new_idx, 10)})
             )
+            task_candidates[appended_tasks[-1].id] = decision.selected_candidate_id
             existing_signatures.add(sig)
 
         if appended_tasks:
@@ -453,6 +474,8 @@ def build_phase1_graph(
                 "replan_count": replan_count + 1,
                 "prepared_requests": prepared_requests,
                 "head_iterations": head_iterations,
+                "candidate_frontier": decision.candidate_frontier,
+                "task_candidates": task_candidates,
             }
 
         return {
@@ -465,13 +488,67 @@ def build_phase1_graph(
             "replan_count": replan_count + 1,
             "prepared_requests": prepared_requests,
             "head_iterations": head_iterations,
-            "stop_reason": state.get("stop_reason", ""),
+            "candidate_frontier": decision.candidate_frontier,
+            "task_candidates": task_candidates,
+            "stop_reason": ("No new executable objective remained after duplicate/cap checks."
+                            if queue_empty else state.get("stop_reason", "")),
         }
 
     def _replan_route(state: SessionState) -> str:
         return "generate_report" if state.get("finished") else "select_task"
 
+    def _reflect_node(state: SessionState) -> Dict[str, object]:
+        runs = state.get("runs", [])
+        if not runs:
+            return {}
+        run = runs[-1]
+        reflections = list(state.get("attempt_reflections", []))
+        if any(item["attempt_id"] == run.task.id for item in reflections):
+            return {}
+        reflection = planner.reflect(
+            user_goal=state["user_goal"], attempt_id=run.task.id, attempt=run.model_dump(),
+            findings=state.get("findings", []), prior_reflections=reflections)
+        reflections.append(reflection.model_dump())
+        frontier = [dict(node) for node in state.get("candidate_frontier", [])]
+        candidate_id = state.get("task_candidates", {}).get(run.task.id)
+        for node in frontier:
+            if node["candidate_id"] == candidate_id:
+                node.update(status="attempted", attempt_id=run.task.id, outcome=reflection.outcome)
+        return {"attempt_reflections": reflections, "candidate_frontier": frontier}
+
     def _report_node(state: SessionState) -> Dict[str, object]:
+        reflections = list(state.get("attempt_reflections", []))
+        frontier = [dict(node) for node in state.get("candidate_frontier", [])]
+        # Compilation failures do not visit the execution/reflection nodes. Retain them too.
+        for iteration in state.get("head_iterations", []):
+            if iteration.get("compilation_error") and not any(
+                item["attempt_id"] == iteration["task_id"] for item in reflections
+            ):
+                reflection = planner.reflect(
+                    user_goal=state["user_goal"], attempt_id=iteration["task_id"], attempt=iteration,
+                    compilation_error=iteration["compilation_error"],
+                    findings=state.get("findings", []), prior_reflections=reflections)
+                reflections.append(reflection.model_dump())
+                for node in frontier:
+                    if node["candidate_id"] == iteration.get("selected_candidate_id"):
+                        node.update(status="attempted", attempt_id=iteration["task_id"],
+                                    outcome="compilation_failure")
+        session_reflection = planner.consolidate(
+            user_goal=state["user_goal"], reflections=reflections,
+            stop_reason=state.get("stop_reason", "") or "No further objectives queued.")
+        output_dir = Path(state["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        feedback_path = output_dir / f"{state['session_id']}_feedback.json"
+        feedback_path.write_text(json.dumps({
+            "session_id": state["session_id"], "target": state["target"],
+            "user_goal": state["user_goal"], **session_reflection.model_dump(),
+            "search_history": [{
+                "task_id": iteration["task_id"],
+                "selected_candidate_id": iteration.get("selected_candidate_id", ""),
+                "search_trace": iteration.get("search_trace", []),
+                "compilation_error": iteration.get("compilation_error", ""),
+            } for iteration in state.get("head_iterations", [])],
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
         report_path = reporter.write_markdown_report(
             output_dir=Path(state["output_dir"]),
             session_id=state["session_id"],
@@ -483,8 +560,11 @@ def build_phase1_graph(
             findings=state.get("findings", []),
             planning_trace=state.get("planning_trace", []),
             stop_reason=str(state.get("stop_reason", "")),
+            session_reflection=session_reflection.model_dump(),
         )
-        return {"report_path": str(report_path)}
+        return {"report_path": str(report_path), "attempt_reflections": reflections,
+                "session_reflection": session_reflection.model_dump(), "feedback_path": str(feedback_path),
+                "candidate_frontier": frontier}
 
     graph.add_node("plan_tasks", _plan_node)
     graph.add_node("select_task", _select_node)
@@ -492,6 +572,7 @@ def build_phase1_graph(
     graph.add_node("review_action", _review_node)
     graph.add_node("execute_request", _execute_node)
     graph.add_node("analyze_result", _analyze_node)
+    graph.add_node("reflect_attempt", _reflect_node)
     graph.add_node("replan_task", _replan_node)
     graph.add_node("generate_report", _report_node)
 
@@ -501,7 +582,8 @@ def build_phase1_graph(
     graph.add_edge("compile_request", "review_action")
     graph.add_edge("review_action", "execute_request")
     graph.add_edge("execute_request", "analyze_result")
-    graph.add_edge("analyze_result", "replan_task")
+    graph.add_edge("analyze_result", "reflect_attempt")
+    graph.add_edge("reflect_attempt", "replan_task")
     graph.add_conditional_edges("replan_task", _replan_route, {"select_task": "select_task", "generate_report": "generate_report"})
     graph.add_edge("generate_report", END)
 

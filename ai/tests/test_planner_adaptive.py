@@ -36,11 +36,57 @@ class Retriever:
         return "REAL DOCUMENTATION: nuclei_xss supports scan with tags."
 
 
-def observation(note="private memory", decision="continue", next_step="Check the observed page for XSS"):
-    return (f"Observation: Observed endpoint {URL}; auth unverified.\n"
-            "Observation: Public assessment retained only by the head; inspect remaining gaps.\n"
-            f"Summary: Endpoint {URL}; auth unverified; check XSS using documented arguments.\n"
-            f"Next step: {next_step}\nMemory note: {note}\nDecision: {decision}")
+def observation(note="private memory", decision="continue", next_step="Check the observed page for XSS", mode="branch"):
+    candidate = {
+        "objective": next_step,
+        "observation_summary": f"Endpoint {URL}; auth unverified; check XSS using documented arguments.",
+        "evidence_refs": ["context"], "expected_information": "Resolve the observed page's exposure.",
+    }
+    candidates = [] if decision == "stop" else [candidate]
+    if candidates and mode == "branch":
+        candidates.append({**candidate, "objective": "Inspect a different observed endpoint"})
+    return json.dumps({
+        "observations": [f"Observed endpoint {URL}; auth unverified.",
+                         "Public assessment retained only by the head; inspect remaining gaps."],
+        "mode": "stop" if decision == "stop" else mode, "candidates": candidates,
+        "memory_note": note, "stop_reason": next_step if decision == "stop" else "",
+    })
+
+
+class HeadLLM(LLM):
+    """Phase-aware model double; proposal responses remain explicitly scripted."""
+    def invoke(self, messages):
+        self.calls.append(list(messages))
+        payload = json.loads(messages[1].content)
+        phase = payload["phase"]
+        if phase == "propose":
+            response = next(self.responses)
+            if isinstance(response, Exception):
+                raise response
+            return SimpleNamespace(content=response)
+        if phase == "evaluate":
+            records = []
+            for index, node in enumerate(payload["candidates_to_evaluate"]):
+                records.append({
+                    "candidate_id": node["candidate_id"], "disposition": "viable",
+                    "evidence_refs": ["context"], "assessment": "Objective supported by supplied context.",
+                    "evidence_strength": 3 if index == len(payload["candidates_to_evaluate"]) - 2 else 1,
+                    "information_gain": 2, "goal_alignment": 2, "cost": 1,
+                })
+            response = {"evaluations": records}
+        elif phase == "reflect_attempt":
+            response = {
+                "attempt_id": payload["attempt_id"], "outcome": payload["required_outcome"] or "negative",
+                "evidence_refs": payload["available_evidence_refs"], "lesson": "Retain the actual execution evidence.",
+                "next_adjustment": "Check another documented objective.",
+                "retry_condition": "Only retry after new evidence or corrected inputs.",
+                "progress": payload["required_outcome"] is None, "source": "model",
+            }
+        else:
+            assert phase == "reflect_session"
+            response = {"summary": "Recorded attempts reviewed; retain their lessons.",
+                        "unresolved_questions": []}
+        return SimpleNamespace(content=json.dumps(response))
 
 
 def planner(llm):
@@ -86,14 +132,14 @@ def test_implementor_normalizes_target_format(target_mode, target_value, string_
                                          (observation().replace("Check the observed page for XSS", '{"tool": "x"}'),) * 2])
 def test_head_never_converts_failed_or_json_output_into_actions(responses):
     from ai.contracts.schemas import TargetSpec
-    decision = planner(LLM(*responses)).plan(user_goal="Check XSS", target=TargetSpec(url=URL), operator_context={})
+    decision = planner(HeadLLM(*responses)).plan(user_goal="Check XSS", target=TargetSpec(url=URL), operator_context={})
     assert decision.should_stop
     assert decision.handoff is None
 
 
 def test_head_corrects_invalid_format_and_preserves_context():
     from ai.contracts.schemas import TargetSpec
-    head = planner(LLM('{"tasks": []}', observation()))
+    head = planner(HeadLLM('{"tasks": []}', observation()))
     decision = head.plan(user_goal="Check XSS", target=TargetSpec(url=URL), operator_context={
         "auth_cookie": "session=current", "auth_verified": True,
         "discovered_endpoints": [URL], "password": "secret", "llm_notes": ["not forwarded"],
@@ -131,7 +177,7 @@ def test_head_requires_separate_observations_and_handoff_summary(with_summary):
     legacy = f"Observation: {URL}\nNext step: Scan\nMemory note: Keep\nDecision: continue"
     if with_summary:
         legacy = legacy.replace("\nNext step:", "\nSummary: Scan the observed endpoint\nNext step:")
-    decision = planner(LLM(legacy, legacy)).plan(
+    decision = planner(HeadLLM(legacy, legacy)).plan(
         user_goal="Check XSS", target=TargetSpec(url=URL), operator_context={})
     assert decision.should_stop
     assert decision.handoff is None
@@ -158,7 +204,7 @@ def test_implementor_can_assess_multiple_real_retrievals_before_tool_request(cap
 @pytest.mark.parametrize("retriever", [None, Retriever()])
 def test_implementor_never_guesses_on_unavailable_or_empty_rag(retriever):
     from ai.contracts.schemas import TargetSpec
-    handoff = planner(LLM(observation())).plan(user_goal="Check XSS", target=TargetSpec(url=URL), operator_context={}).handoff
+    handoff = planner(HeadLLM(observation())).plan(user_goal="Check XSS", target=TargetSpec(url=URL), operator_context={}).handoff
     if retriever:
         retriever.retrieve_all_for_tool = lambda _tool: ""
     with pytest.raises(RuntimeError):
@@ -206,7 +252,7 @@ def run_graph(head_llm, impl_llm, tmp_path, retriever=None):
 
 
 def test_graph_head_only_memory_and_stateless_implementor(tmp_path):
-    head = LLM(observation("initial private memory"), observation("second private memory", next_step="Check a second template"),
+    head = HeadLLM(observation("initial private memory"), observation("second private memory", next_step="Check a second template"),
                observation("finished memory", "stop", "Goal satisfied"))
     impl = LLM(RETRIEVE, final(), RETRIEVE, final("task-02", "other"))
     state, runner, approver, reporter = run_graph(head, impl, tmp_path, Retriever())
@@ -219,14 +265,18 @@ def test_graph_head_only_memory_and_stateless_implementor(tmp_path):
         "Public assessment retained only by the head; inspect remaining gaps.",
     ]
     assert state["head_iterations"][0]["implementor_steps"][0]["retrieval_observation"].startswith("REAL DOCUMENTATION")
-    final_head_input = json.loads(head.calls[2][1].content)["head_memory_and_evidence"]
+    propose_calls = [call for call in head.calls if json.loads(call[1].content)["phase"] == "propose"]
+    final_head_input = json.loads(propose_calls[2][1].content)["head_memory_and_evidence"]
     assert len(final_head_input["execution_history"]) == 2
     assert [run["request"]["task_id"] for run in final_head_input["execution_history"]] == ["task-01", "task-02"]
     assert final_head_input["execution_history"][0]["result"]["stdout"] == "execution evidence"
     assert final_head_input["iteration_history"] == state["head_iterations"][:2]
-    assert "initial private memory" in head.calls[1][1].content
-    assert "execution evidence" in head.calls[1][1].content
-    assert "second private memory" in head.calls[2][1].content
+    assert final_head_input["reflections"] == state["attempt_reflections"]
+    first_replan_input = json.loads(propose_calls[1][1].content)["head_memory_and_evidence"]
+    assert first_replan_input["reflections"][0]["attempt_id"] == "task-01"
+    assert "initial private memory" in propose_calls[1][1].content
+    assert "execution evidence" in propose_calls[1][1].content
+    assert "second private memory" in propose_calls[2][1].content
     for index in (0, 2):
         assert len(impl.calls[index]) == 2  # Fresh system + current handoff.
         user_input = json.loads(impl.calls[index][1].content)
@@ -241,18 +291,19 @@ def test_graph_head_only_memory_and_stateless_implementor(tmp_path):
 
 
 def test_graph_stops_and_reports_when_rag_is_missing(tmp_path):
-    state, runner, approver, reporter = run_graph(LLM(observation()), LLM(), tmp_path)
+    state, runner, approver, reporter = run_graph(HeadLLM(observation()), LLM(), tmp_path)
     assert not runner.requests
     assert not approver.requests
     assert "Implementor could not produce" in state["stop_reason"]
     assert reporter.report["stop_reason"] == state["stop_reason"]
     assert state["head_iterations"][0]["compilation_error"] == state["stop_reason"]
+    assert state["attempt_reflections"][0]["outcome"] == "compilation_failure"
 
 
 def test_graph_retains_failed_rag_action_without_executing(tmp_path):
     retriever = Retriever()
     retriever.retrieve_all_for_tool = lambda _tool: ""
-    state, runner, approver, _ = run_graph(LLM(observation()), LLM(RETRIEVE), tmp_path, retriever)
+    state, runner, approver, _ = run_graph(HeadLLM(observation()), LLM(RETRIEVE), tmp_path, retriever)
     assert not runner.requests
     assert not approver.requests
     step = state["head_iterations"][0]["implementor_steps"][0]
@@ -263,7 +314,7 @@ def test_graph_retains_failed_rag_action_without_executing(tmp_path):
 def test_graph_executes_implementor_request_with_string_url_target(tmp_path):
     response = final().replace(json.dumps({"url": URL}), json.dumps(URL))
     state, runner, approver, _ = run_graph(
-        LLM(observation(), observation(decision="stop", next_step="Done")),
+        HeadLLM(observation(), observation(decision="stop", next_step="Done")),
         LLM(RETRIEVE, response), tmp_path, Retriever())
     assert len(runner.requests) == len(approver.requests) == 1
     assert runner.requests[0].target.url == URL
@@ -272,7 +323,7 @@ def test_graph_executes_implementor_request_with_string_url_target(tmp_path):
 
 def test_head_stop_never_calls_implementor(tmp_path):
     impl = LLM()
-    state, runner, _, _ = run_graph(LLM(observation(decision="stop", next_step="Missing required input")), impl, tmp_path)
+    state, runner, _, _ = run_graph(HeadLLM(observation(decision="stop", next_step="Missing required input")), impl, tmp_path)
     assert not impl.calls
     assert not runner.requests
     assert state["stop_reason"] == "Missing required input"
@@ -298,7 +349,7 @@ def test_graph_injects_current_cookie_and_keeps_final_state_serializable(tmp_pat
     import ai.orchestration.langgraph_flow as flow
     monkeypatch.setattr(flow, "refresh_session_cookie", lambda **kwargs: "session=fresh")
     runner, approver = Runner(), Approver()
-    graph = build_phase1_graph(planner=planner(LLM(observation(), observation(decision="stop", next_step="Done"))),
+    graph = build_phase1_graph(planner=planner(HeadLLM(observation(), observation(decision="stop", next_step="Done"))),
                               implementor=compiler(LLM(RETRIEVE, final()), Retriever()),
                               action_filter=approver, run_manager=runner, analyzer=Analyzer(), reporter=Reporter()).compile()
     state = graph.invoke({"session_id": "test", "user_goal": "Check XSS", "target": {"url": URL},
@@ -332,7 +383,7 @@ def test_missing_documentation_cannot_count_as_successful_retrieval():
 
 def test_invalid_implementor_request_stops_before_approval(tmp_path):
     response = final().replace('"target_mode": "url"', '"target_mode": "request_file"')
-    state, runner, approver, reporter = run_graph(LLM(observation()), LLM(RETRIEVE, response), tmp_path, Retriever())
+    state, runner, approver, reporter = run_graph(HeadLLM(observation()), LLM(RETRIEVE, response), tmp_path, Retriever())
     assert not runner.requests
     assert not approver.requests
     assert "Implementor could not produce" in state["stop_reason"]

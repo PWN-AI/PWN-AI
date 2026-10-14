@@ -49,7 +49,7 @@ runtime:
 rag:
   enabled: true
   persist_dir: "ai/rag/index"
-  # The head is observation-only and has no retrieval loop.
+  # Head candidate search/reflection has no retrieval loop.
   # Maximum ReAct iterations for implementor
   max_react_iterations_impl: 3
 

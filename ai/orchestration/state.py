@@ -30,6 +30,12 @@ class SessionState(TypedDict, total=False):
     llm_notes: List[str]        # head-only session memory, including the initial observation
     planning_trace: List[str]
     head_iterations: List[Dict[str, Any]]  # Full public observation + RAG records; head only.
+    candidate_frontier: List[Dict[str, Any]]
+    task_candidates: Dict[str, str]
+    attempt_reflections: List[Dict[str, Any]]
+    session_reflection: Dict[str, Any]
+    feedback_path: str
+    prior_session_feedback: List[Dict[str, Any]]
     replan_count: int
     stop_reason: str
     finished: bool

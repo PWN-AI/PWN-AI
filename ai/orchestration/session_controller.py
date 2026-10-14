@@ -235,8 +235,8 @@ def run_session(args: argparse.Namespace) -> SessionState:
         "max_new_tasks_per_replan": max_new_tasks_per_replan,
         "notes": notes,
     }
-    # Each task crosses seven graph nodes; allow the configured adaptive budget.
-    final_state = app.invoke(initial_state, config={"recursion_limit": 10 + 8 * (max_replans + 1)})
+    # Include reflection after every execution plus the final consolidation/report.
+    final_state = app.invoke(initial_state, config={"recursion_limit": 12 + 9 * (max_replans + 1)})
     return final_state
 
 
@@ -251,6 +251,7 @@ def main() -> None:
     print(f"Runs executed: {len(final_state.get('runs', []))}")
     print(f"Findings generated: {len(final_state.get('findings', []))}")
     print(f"Report path: {final_state.get('report_path')}")
+    print(f"Feedback path: {final_state.get('feedback_path')}")
 
     if args.print_final_state:
         serializable = {}
