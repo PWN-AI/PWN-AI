@@ -241,6 +241,8 @@ class HeadPlanner:
         def validate(record: AttemptReflection) -> None:
             if record.attempt_id != attempt_id or record.source != "model":
                 raise ValueError("Preserve the supplied attempt_id and use source=model.")
+            if record.outcome == "duplicate_rejected":
+                raise ValueError("Duplicate rejection is written only by the runtime, never inferred from tool output.")
             self._check_refs(record.evidence_refs, {ref})
             if forced and record.outcome != forced:
                 raise ValueError(f"Recorded execution status requires outcome={forced}.")
@@ -248,7 +250,7 @@ class HeadPlanner:
                                              record.outcome not in {"positive", "negative"}):
                 raise ValueError("Only a supplied open question resolved by a conclusive result may be closed.")
             if record.outcome in {"compilation_failure", "denied", "timeout", "execution_failure",
-                                  "authentication_failure", "inconclusive"} and record.progress:
+                                  "authentication_failure", "inconclusive", "duplicate_rejected"} and record.progress:
                 raise ValueError("An incomplete/failed attempt cannot claim verified progress.")
 
         try:

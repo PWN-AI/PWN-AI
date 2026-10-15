@@ -77,7 +77,7 @@ class CandidateReview(Record):
 
 Outcome = Literal[
     "positive", "negative", "execution_failure", "authentication_failure", "timeout",
-    "denied", "inconclusive", "compilation_failure",
+    "denied", "inconclusive", "compilation_failure", "duplicate_rejected",
 ]
 
 

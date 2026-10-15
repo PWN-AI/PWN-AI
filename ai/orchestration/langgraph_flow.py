@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from langgraph.graph import END, START, StateGraph
 
 from ai.agents.head.planner import HeadPlanner
+from ai.agents.head.contracts import AttemptReflection
 from ai.agents.head.memory import build_working_memory
 from ai.agents.implementor.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
@@ -424,102 +425,95 @@ def build_phase1_graph(
                 "stop_reason": "Reached max re-plan limit.",
             }
 
-        decision = planner.replan(
-            user_goal=state["user_goal"],
-            target=TargetSpec.model_validate(state["target"]),
-            operator_context=state.get("operator_context", {}),
-            current_task=current_task,
-            current_result=current_result,
-            findings=state.get("findings", []),
-            remaining_tasks=tasks[next_index:],
-            prior_notes=llm_notes,
-            replan_iteration=replan_count,
-            max_new_tasks=max_new_tasks,
-            iteration_history=state.get("head_iterations", []),
-            execution_history=[run.model_dump() for run in state.get("runs", [])],
-            runtime_notes=notes,
-            candidate_frontier=state.get("candidate_frontier", []),
-            reflections=state.get("attempt_reflections", []),
-            working_memory=state.get("working_memory") or _working_memory(state),
-        )
-        _print_head_trace(
-            f"Adaptive Re-plan #{replan_count + 1} (after {current_task.id})",
-            decision.thinking_summary,
-            [],
-        )
-        produced_tasks, new_requests, iteration = _compile_handoff(
-            decision, state, f"task-{len(tasks) + 1:02d}")
-        head_iterations = list(state.get("head_iterations", [])) + [iteration]
-        prepared_requests = dict(state.get("prepared_requests", {}))
-        prepared_requests.update(new_requests)
-        task_candidates = dict(state.get("task_candidates", {}))
-        planning_trace.append(f"Re-plan #{replan_count + 1}: " + " | ".join(decision.thinking_summary))
-        # Accumulate the LLM's own notes about this task's result.
-        if decision.task_notes:
-            llm_notes = llm_notes + decision.task_notes
-            print(f"[Replan] LLM wrote {len(decision.task_notes)} note(s) for future context.")
-
-        existing_signatures = {_task_signature(task) for task in tasks}
-        appended_tasks: List[TaskSpec] = []
-        for task in produced_tasks:
-            sig = _task_signature(task)
-            if sig in existing_signatures:
-                notes.append(f"Skipped repeated executable request for {task.id}; no new action executed.")
-                continue
-            if len(tasks) + len(appended_tasks) >= max_total_tasks:
-                notes.append("Adaptive tasks skipped because max task cap was reached.")
-                break
-            new_idx = len(tasks) + len(appended_tasks) + 1
-            appended_tasks.append(
-                task.model_copy(update={"id": f"task-{new_idx:02d}", "priority": min(new_idx, 10)})
+        # Rejected proposals consume the same finite planning budget as accepted ones.
+        # They do not advance the execution queue or pretend that a tool ran.
+        working: SessionState = dict(state)
+        working["working_memory"] = state.get("working_memory") or _working_memory(state)
+        while replan_count < max_replans:
+            decision = planner.replan(
+                user_goal=state["user_goal"], target=TargetSpec.model_validate(state["target"]),
+                operator_context=state.get("operator_context", {}), current_task=current_task,
+                current_result=current_result, findings=state.get("findings", []),
+                remaining_tasks=tasks[next_index:], prior_notes=llm_notes, replan_iteration=replan_count,
+                max_new_tasks=max_new_tasks, iteration_history=working.get("head_iterations", []),
+                execution_history=[run.model_dump() for run in state.get("runs", [])], runtime_notes=notes,
+                candidate_frontier=working.get("candidate_frontier", []),
+                reflections=working.get("attempt_reflections", []), working_memory=working["working_memory"],
             )
-            task_candidates[appended_tasks[-1].id] = decision.selected_candidate_id
-            existing_signatures.add(sig)
-
-        if appended_tasks:
-            tasks = list(tasks) + appended_tasks
-            notes.append(f"Adaptive re-planning appended {len(appended_tasks)} task(s).")
-
-        queue_empty = next_index >= len(tasks)
-        if decision.should_stop and queue_empty:
-            stop_reason = decision.stop_reason or "Head planner requested stop after re-plan."
-            notes.append(f"Session finished by head planner: {stop_reason}")
-            return {
-                "task_index": next_index,
-                "tasks": tasks,
-                "finished": True,
-                "stop_reason": stop_reason,
-                "notes": notes,
-                "llm_notes": llm_notes,
-                "planning_trace": planning_trace,
-                "replan_count": replan_count + 1,
-                "prepared_requests": prepared_requests,
-                "head_iterations": head_iterations,
-                "candidate_frontier": decision.candidate_frontier,
-                "task_candidates": task_candidates,
-                "working_memory": _working_memory({**state, "head_iterations": head_iterations,
-                                                     "candidate_frontier": decision.candidate_frontier,
-                                                     "notes": notes, "replan_count": replan_count + 1}, replan_count + 1),
+            _print_head_trace(f"Adaptive Re-plan #{replan_count + 1} (after {current_task.id})",
+                              decision.thinking_summary, [])
+            # Proposal IDs stay unique even when a duplicate never enters the task queue.
+            produced_tasks, new_requests, iteration = _compile_handoff(
+                decision, working, f"task-{replan_count + 2:02d}")
+            replan_count += 1
+            head_iterations = list(working.get("head_iterations", [])) + [iteration]
+            planning_trace.append(f"Re-plan #{replan_count}: " + " | ".join(decision.thinking_summary))
+            llm_notes.extend(decision.task_notes)
+            updates = {
+                "task_index": next_index, "tasks": tasks, "notes": notes, "llm_notes": llm_notes,
+                "planning_trace": planning_trace, "replan_count": replan_count,
+                "head_iterations": head_iterations, "candidate_frontier": decision.candidate_frontier,
+                "stop_reason": "", "finished": False,
             }
+            working.update(updates)
+            if decision.should_stop:
+                stop_reason = decision.stop_reason or "Head planner requested stop after re-plan."
+                notes.append(f"Session finished by head planner: {stop_reason}")
+                working.update(finished=next_index >= len(tasks), stop_reason=stop_reason)
+                break
 
-        return {
-            "task_index": next_index,
-            "tasks": tasks,
-            "finished": queue_empty,
-            "notes": notes,
-            "llm_notes": llm_notes,
-            "planning_trace": planning_trace,
-            "replan_count": replan_count + 1,
-            "prepared_requests": prepared_requests,
-            "head_iterations": head_iterations,
-            "candidate_frontier": decision.candidate_frontier,
-            "task_candidates": task_candidates,
-            "working_memory": _working_memory({**state, "head_iterations": head_iterations,
-                                                 "candidate_frontier": decision.candidate_frontier,
-                                                 "notes": notes, "replan_count": replan_count + 1}, replan_count + 1),
-            "stop_reason": ("No new executable objective remained after duplicate/cap checks."
-                            if queue_empty else state.get("stop_reason", "")),
-        }
+            duplicate = None
+            for task in produced_tasks:
+                duplicate = next((previous for previous in tasks
+                                  if _task_signature(previous) == _task_signature(task)), None)
+                if duplicate is not None:
+                    message = (f"Rejected repeated executable request {task.id}; it matches {duplicate.id}. "
+                               "No new action executed. Return to the head to revise the request or choose an alternative.")
+                    notes.append(message)
+                    print(f"[Replan] {message}", flush=True)
+                    iteration["rejection"] = {"reason": "duplicate_request", "duplicate_of": duplicate.id,
+                                               "message": message}
+                    reflection = AttemptReflection(
+                        attempt_id=task.id, outcome="duplicate_rejected", evidence_refs=[f"attempt:{task.id}"],
+                        lesson=message,
+                        next_adjustment=("Use the prior attempt's feedback to correct the exact request, or choose "
+                                         "a different viable candidate. A new objective title alone changes no arguments."),
+                        retry_condition="Submit a grounded change to the tool, action, target, or arguments.",
+                        progress=False, source="runtime")
+                    working["attempt_reflections"] = list(working.get("attempt_reflections", [])) + [reflection.model_dump()]
+                    for node in decision.candidate_frontier:
+                        if node["candidate_id"] == decision.selected_candidate_id:
+                            node.update(status="rejected", attempt_id=task.id, outcome="duplicate_rejected",
+                                        duplicate_of=duplicate.id)
+                    # The next head call sees the rejection and original execution feedback first.
+                    working["working_memory"] = _working_memory(working, replan_count + 1)
+                    break
+                if len(tasks) >= max_total_tasks:
+                    working.update(finished=True, stop_reason="Reached total task cap.")
+                    break
+                tasks = list(tasks) + [task.model_copy(update={"priority": min(len(tasks) + 1, 10)})]
+                prepared_requests = dict(working.get("prepared_requests", {}))
+                prepared_requests.update(new_requests)
+                task_candidates = dict(working.get("task_candidates", {}))
+                task_candidates[task.id] = decision.selected_candidate_id
+                notes.append("Adaptive re-planning appended 1 task(s).")
+                working.update(tasks=tasks, prepared_requests=prepared_requests, task_candidates=task_candidates)
+            if duplicate is not None:
+                continue
+            if not produced_tasks and not working.get("finished"):
+                working.update(finished=True, stop_reason="Head produced no executable objective.")
+            break
+        else:
+            working.update(finished=True, stop_reason="Reached max re-plan limit after rejecting repeated executable requests.")
+            notes.append(working["stop_reason"])
+
+        working["working_memory"] = _working_memory(working, replan_count)
+        # Return only fields this node owns; preserve actual execution state for the next task.
+        return {key: working[key] for key in (
+            "task_index", "tasks", "notes", "llm_notes", "planning_trace", "replan_count",
+            "head_iterations", "candidate_frontier", "stop_reason", "finished", "working_memory",
+            "attempt_reflections", "prepared_requests", "task_candidates",
+        )}
 
     def _replan_route(state: SessionState) -> str:
         return "generate_report" if state.get("finished") else "select_task"

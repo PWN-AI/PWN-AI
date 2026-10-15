@@ -144,12 +144,20 @@ def build_working_memory(*, session_id: str, user_goal: str, target: Mapping[str
     # Failed compilation has feedback but no executable run; retain it in the ledger too.
     for entry in iterations:
         attempt_id = entry.get("task_id", "")
-        if entry.get("compilation_error") and not any(item["attempt_id"] == attempt_id for item in ledger):
+        if (entry.get("compilation_error") or entry.get("rejection")) and not any(
+            item["attempt_id"] == attempt_id for item in ledger
+        ):
             assessment = by_attempt.get(attempt_id, {})
+            rejection = entry.get("rejection", {})
             ledger.append({"attempt_id": attempt_id, "evidence_ref": f"attempt:{attempt_id}",
                            "objective": entry.get("next_step", ""), "execution_status": "not_executed",
-                           "error": entry["compilation_error"], "outcome": "compilation_failure",
+                           "request": entry.get("tool_request", {}),
+                           "error": entry.get("compilation_error") or rejection.get("message"),
+                           "outcome": "duplicate_rejected" if rejection else "compilation_failure",
+                           "duplicate_of": rejection.get("duplicate_of"),
                            "progress": False, "resolved_question": "", "assessment_source": assessment.get("source")})
+    order = {entry["task_id"]: index for index, entry in enumerate(iterations) if entry.get("task_id")}
+    ledger.sort(key=lambda item: order.get(item["attempt_id"], len(order)))
     proposals = [record for entry in reversed(iterations)
                  for record in reversed(entry.get("search_trace", [])) if record.get("phase") == "propose"]
     latest_proposal = proposals[0] if proposals else {}

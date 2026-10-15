@@ -174,6 +174,15 @@ review stops executable handoffs. The existing `max_replans` bounds real attempt
 planning decision takes proposal + review calls, each attempt adds a reflection call, and
 session end adds a consolidation call (plus at most one correction per phase).
 
+If a proposed request repeats a previous tool/action/target/argument combination, the
+runtime rejects it without approval or execution and writes `duplicate_rejected` feedback
+into the same-session ledger. The head then replans with that feedback and can correct
+the request or choose a retained alternative. Changing an objective title alone does not
+make a request new. Rejected proposals count against `max_replans`; repeated duplicates
+eventually stop with an explicit budget-exhaustion reason. Proposal/attempt IDs remain
+unique across rejected and executed requests, so execution IDs may have gaps. Raw output
+and `latest_result` still represent actual executions, not rejected proposals.
+
 Each implementor call runs its own bounded observation/action loop. Retrieval actions execute
 in the runtime; results return in the next model call before a final JSON request can be accepted.
 Each accepted assessment/action and real RAG result is recorded in session state. During
