@@ -234,6 +234,7 @@ def build_phase1_graph(
             "task_candidates": {task.id: decision.selected_candidate_id for task in tasks},
             "attempt_reflections": [],
             "session_reflection": {},
+            "session_thinking_steps": [],
             "replan_count": 0,
             "finished": len(tasks) == 0,
             "stop_reason": decision.stop_reason if decision.should_stop else "",
@@ -526,41 +527,51 @@ def build_phase1_graph(
         reflections = list(state.get("attempt_reflections", []))
         if any(item["attempt_id"] == run.task.id for item in reflections):
             return {}
+        thinking_steps = []
         reflection = planner.reflect(
             user_goal=state["user_goal"], attempt_id=run.task.id, attempt=run.model_dump(),
             findings=state.get("findings", []), prior_reflections=reflections,
-            open_questions=state.get("working_memory", {}).get("open_questions", []))
+            open_questions=state.get("working_memory", {}).get("open_questions", []), trace_sink=thinking_steps)
         reflections.append(reflection.model_dump())
         frontier = [dict(node) for node in state.get("candidate_frontier", [])]
         candidate_id = state.get("task_candidates", {}).get(run.task.id)
         for node in frontier:
             if node["candidate_id"] == candidate_id:
                 node.update(status="attempted", attempt_id=run.task.id, outcome=reflection.outcome)
-        updates = {"attempt_reflections": reflections, "candidate_frontier": frontier}
+        head_iterations = [dict(entry) for entry in state.get("head_iterations", [])]
+        for entry in head_iterations:
+            if entry["task_id"] == run.task.id:
+                entry["reflection_thinking_steps"] = thinking_steps
+        updates = {"attempt_reflections": reflections, "candidate_frontier": frontier,
+                   "head_iterations": head_iterations}
         updates["working_memory"] = _working_memory({**state, **updates})
         return updates
 
     def _report_node(state: SessionState) -> Dict[str, object]:
         reflections = list(state.get("attempt_reflections", []))
         frontier = [dict(node) for node in state.get("candidate_frontier", [])]
+        head_iterations = [dict(entry) for entry in state.get("head_iterations", [])]
         # Compilation failures do not visit the execution/reflection nodes. Retain them too.
-        for iteration in state.get("head_iterations", []):
+        for iteration in head_iterations:
             if iteration.get("compilation_error") and not any(
                 item["attempt_id"] == iteration["task_id"] for item in reflections
             ):
+                thinking_steps = []
                 reflection = planner.reflect(
                     user_goal=state["user_goal"], attempt_id=iteration["task_id"], attempt=iteration,
                     compilation_error=iteration["compilation_error"],
                     findings=state.get("findings", []), prior_reflections=reflections,
-                    open_questions=state.get("working_memory", {}).get("open_questions", []))
+                    open_questions=state.get("working_memory", {}).get("open_questions", []), trace_sink=thinking_steps)
+                iteration["reflection_thinking_steps"] = thinking_steps
                 reflections.append(reflection.model_dump())
                 for node in frontier:
                     if node["candidate_id"] == iteration.get("selected_candidate_id"):
                         node.update(status="attempted", attempt_id=iteration["task_id"],
                                     outcome="compilation_failure")
+        session_thinking_steps = []
         session_reflection = planner.consolidate(
             user_goal=state["user_goal"], reflections=reflections,
-            stop_reason=state.get("stop_reason", "") or "No further objectives queued.")
+            stop_reason=state.get("stop_reason", "") or "No further objectives queued.", trace_sink=session_thinking_steps)
         report_path = reporter.write_markdown_report(
             output_dir=Path(state["output_dir"]),
             session_id=state["session_id"],
@@ -576,6 +587,7 @@ def build_phase1_graph(
         )
         return {"report_path": str(report_path), "attempt_reflections": reflections,
                 "session_reflection": session_reflection.model_dump(), "candidate_frontier": frontier,
+                "head_iterations": head_iterations, "session_thinking_steps": session_thinking_steps,
                 "working_memory": _working_memory({**state, "attempt_reflections": reflections,
                                                     "candidate_frontier": frontier})}
 

@@ -89,8 +89,25 @@ class HeadLLM(LLM):
         return SimpleNamespace(content=json.dumps(response))
 
 
+def ready_response(payload):
+    return "Observation: Assessment is complete based on the supplied evidence.\nStatus: ready\n" + payload
+
+
+class HeadProtocolFixture:
+    """Give older JSON-only fixtures the new envelope; protocol tests use raw LLM doubles."""
+    def __init__(self, llm):
+        self.llm = llm
+
+    def invoke(self, messages):
+        response = self.llm.invoke(messages)
+        content = response.content
+        if content.lstrip().startswith(("{", "```json")):
+            return SimpleNamespace(content=ready_response(content))
+        return response
+
+
 def planner(llm):
-    return HeadPlanner(llm, ROOT / "agents/head/system_prompt.md")
+    return HeadPlanner(HeadProtocolFixture(llm), ROOT / "agents/head/system_prompt.md")
 
 
 def compiler(llm, retriever):

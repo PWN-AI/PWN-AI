@@ -4,7 +4,8 @@ head_prompt_rules:
   - "Reflect after each actual attempt and consolidate feedback at session end."
   - "Use goal-scoped working memory and relevant current-session evidence, not full-history replay or previous sessions."
   - "Hand off only the selected summary/objective and current target context."
-  - "Return phase-specific planning JSON; never retrieve documentation, produce executable requests, or select CLI flags."
+  - "Write assessments with optional labels; continue with Status: need_more_thinking or finish with Status: ready and final phase JSON."
+  - "Never retrieve documentation, produce executable requests, or select CLI flags."
 implementor_prompt_rules:
   - "Each invocation is independent; use only the current handoff."
   - "Observe the handoff, request RAG, and wait for runtime retrieval observations."

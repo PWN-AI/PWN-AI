@@ -27,7 +27,7 @@ class CandidateObjective(Record):
 
 
 class Proposal(Record):
-    observations: list[str] = Field(min_length=2, max_length=8)
+    observations: list[str] = Field(default_factory=list, max_length=8)
     mode: Literal["direct", "branch", "stop"]
     candidates: list[CandidateObjective] = Field(default_factory=list, max_length=3)
     memory_note: str = Field(min_length=1)

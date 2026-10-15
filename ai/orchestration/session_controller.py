@@ -121,6 +121,7 @@ def run_session(args: argparse.Namespace) -> SessionState:
     planner = HeadPlanner(
         llm=head_llm,
         prompt_path=project_root / "ai" / "agents" / "head" / "system_prompt.md",
+        max_thinking_rounds=int(cfg.get("runtime", {}).get("head_thinking_rounds", 3)),
     )
     compiler = ImplementorCompiler(
         llm=impl_llm,

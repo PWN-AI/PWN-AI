@@ -107,8 +107,25 @@ ollama:
 
 ## Observation and action flow
 
-The head uses phase-specific, validated planning JSON. These records contain public
-evidence assessments and decisions, not private internal chain-of-thought:
+The head first writes normal public assessments, then emits a final validated JSON record
+only when ready. `Thought:`, `Observation:`, and `Correction:` are optional: the model may
+use any, repeat them, omit individual labels, or use plain prose. It can also omit prose
+entirely when ready. These are concise evidence/decision summaries, not private internal
+chain-of-thought. No fixed assessment sections or minimum observation count are required.
+
+A response that needs another assessment round ends with:
+
+```text
+Observation: The available evidence leaves a prerequisite unresolved.
+Status: need_more_thinking
+```
+
+The runtime continues the same phase with its previous assessments and original evidence.
+There is no JSON or implementor handoff for that response. When ready, the head ends with
+`Status: ready`, immediately followed by exactly one final JSON object for the current
+phase (optionally in a JSON fence). The prompt describes the required fields in readable
+text; the runtime retains the full schema validation. Status alone cannot bypass schema, evidence-reference,
+or candidate-review validation. Each head phase follows this protocol:
 
 1. **Propose:** initially generate two or three distinct candidate objectives. On later
    calls, use branching for uncertainty, failure, or stalled progress; one direct objective
@@ -169,10 +186,19 @@ but are not replayed in every model prompt. The last three head memory notes and
 runtime notes are included as context; they are explicitly separate from observed facts.
 `candidate_frontier`, `task_candidates`, `attempt_reflections`, `working_memory`, and
 `session_reflection` retain the planning/feedback state. There are no model-weight updates.
-Each structured phase allows one correction for invalid output. An invalid proposal or
-review stops executable handoffs. The existing `max_replans` bounds real attempts; each
-planning decision takes proposal + review calls, each attempt adds a reflection call, and
-session end adds a consolidation call (plus at most one correction per phase).
+`runtime.head_thinking_rounds` sets the assessment-round limit per head phase (default 3,
+minimum 1), plus one repair for invalid output. `need_more_thinking` is a real continuation,
+not a malformed-output repair. Exhaustion before a valid `ready` prevents executable
+handoffs; failed reflection retains conservative runtime feedback. Proposed candidates
+still receive a separate evaluation phase before the implementor runs. The same protocol
+applies to attempt reflection and session consolidation. Public assessment/status records
+are kept under `thinking_steps` in each search-trace phase, `reflection_thinking_steps`
+in the attempt's head iteration, and `session_thinking_steps` for consolidation. They stay
+in the session archive rather than being replayed in every scoped-memory prompt.
+
+The existing `max_replans` bounds planning/recovery attempts independently. Each planning
+decision has proposal + review phases, each executed attempt adds a reflection phase, and
+session end adds consolidation; each phase can use its bounded assessment rounds.
 
 If a proposed request repeats a previous tool/action/target/argument combination, the
 runtime rejects it without approval or execution and writes `duplicate_rejected` feedback

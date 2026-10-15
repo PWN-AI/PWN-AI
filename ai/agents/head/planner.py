@@ -35,7 +35,10 @@ class ObservationHandoff:
 class HeadPlanner:
     """Bounded candidate search and evidence-based reflection; no execution or retrieval."""
 
-    def __init__(self, llm: Any, prompt_path: Path):
+    def __init__(self, llm: Any, prompt_path: Path, max_thinking_rounds: int = 3):
+        if max_thinking_rounds < 1:
+            raise ValueError("max_thinking_rounds must be at least one.")
+        self.max_thinking_rounds = max_thinking_rounds
         self.llm = llm
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
 
@@ -52,29 +55,121 @@ class HeadPlanner:
         candidate_frontier: List[Dict[str, Any]] = field(default_factory=list)
         search_trace: List[Dict[str, Any]] = field(default_factory=list)
 
+    @staticmethod
+    def _field_contract(schema: type[BaseModel]) -> str:
+        """Describe the final record in prose so the model does not echo a schema document."""
+        document = schema.model_json_schema()
+        definitions = document.get("$defs", {})
+        lines = []
+
+        def resolve(node: Dict[str, Any]) -> Dict[str, Any]:
+            return definitions[node["$ref"].split("/")[-1]] if "$ref" in node else node
+
+        def kind(node: Dict[str, Any]) -> str:
+            node = resolve(node)
+            if "anyOf" in node:
+                return " or ".join(kind(option) for option in node["anyOf"])
+            if "enum" in node:
+                return "one of " + ", ".join(repr(value) for value in node["enum"])
+            if node.get("type") == "array":
+                return "array of " + kind(node["items"])
+            return node.get("type", "value")
+
+        def fields(node: Dict[str, Any], prefix: str = "") -> None:
+            node = resolve(node)
+            for name, spec in node.get("properties", {}).items():
+                path = prefix + name
+                required = "required" if name in node.get("required", []) else "optional"
+                limits = [f"{key}={spec[key]}" for key in (
+                    "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum") if key in spec]
+                lines.append(f"- {path}: {kind(spec)} ({', '.join([required, *limits])})")
+                child = resolve(spec)
+                if child.get("type") == "array":
+                    child = resolve(child["items"])
+                    fields(child, path + "[].")
+                elif child.get("type") == "object":
+                    fields(child, path + ".")
+        fields(document)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _read_assessment(text: str) -> tuple[str, str, str]:
+        markers = list(re.finditer(r"(?im)^[ \t]*Status:[^\n]*$", text))
+        if len(markers) != 1:
+            raise ValueError("Use exactly one standalone Status: ready or Status: need_more_thinking line.")
+        marker = markers[0]
+        status = re.fullmatch(r"Status:\s*(ready|need_more_thinking)\s*", marker.group().strip(), re.IGNORECASE)
+        if status is None:
+            raise ValueError("Status must be ready or need_more_thinking.")
+        assessment, final_json = text[:marker.start()].strip(), text[marker.end():].strip()
+        for start in re.finditer(r"(?m)^[ \t]*\{", assessment):
+            try:
+                json.JSONDecoder().raw_decode(assessment[start.start():].lstrip())
+            except ValueError:
+                continue
+            raise ValueError("Write the final JSON only after Status: ready.")
+        value = status.group(1).lower()
+        if value == "need_more_thinking":
+            if not assessment or final_json:
+                raise ValueError("need_more_thinking requires a nonempty assessment and no final JSON or trailing text.")
+        elif not final_json:
+            raise ValueError("ready requires the final JSON after the status line.")
+        return assessment, value, final_json
+
     def _structured(self, phase: str, payload: Dict[str, Any], schema: type[R],
-                    validate: Callable[[R], None] | None = None) -> R:
-        messages = [SystemMessage(content=self.system_prompt + "\nReturn exactly one JSON object "
-                                  "matching this phase's schema:\n" + json.dumps(schema.model_json_schema())),
+                    validate: Callable[[R], None] | None = None,
+                    trace_sink: List[Dict[str, Any]] | None = None) -> R:
+        messages = [SystemMessage(content=self.system_prompt +
+                    f"\nYou have at most {self.max_thinking_rounds} assessment rounds in this phase, "
+                    "plus one correction for invalid output. Assessment labels are optional. "
+                    "Use Status: need_more_thinking to continue without JSON, or Status: ready "
+                    "followed by exactly one final JSON object using this phase's field contract:\n" +
+                    self._field_contract(schema) +
+                    "\nThe contract describes fields; do not copy it as your answer. "
+                    f"Your final record uses these top-level fields: {', '.join(schema.model_fields)}. "
+                    "Fill them with actual values for the supplied goal and evidence. Never return "
+                    "$defs, properties, type definitions, or placeholder examples as the final record."),
                     HumanMessage(content=json.dumps({"phase": phase, **payload}, ensure_ascii=False))]
-        for attempt in range(2):
+        rounds, corrections = 0, 0
+        # A malformed response gets one repair; it does not consume a valid assessment round.
+        for call in range(self.max_thinking_rounds + 1):
+            print(f"[Head Thinking] {phase} | response {call + 1}", flush=True)
             response = self.llm.invoke(messages)
             text = _extract_message_text(getattr(response, "content", response)).strip()
+            event: Dict[str, Any] = {"response": call + 1}
             try:
-                # Some models wrap valid JSON despite the formatting instruction. Accept only
-                # a complete optional fence, never extract arbitrary embedded objects or repair prose.
-                fenced = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL | re.IGNORECASE)
-                record = schema.model_validate(json.loads(fenced.group(1) if fenced else text))
-                if validate:
-                    validate(record)
-                return record
+                assessment, status, final_json = self._read_assessment(text)
+                event.update(assessment=assessment, status=status)
+                if status == "ready":
+                    fenced = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?```", final_json, re.DOTALL | re.IGNORECASE)
+                    record = schema.model_validate(json.loads(fenced.group(1) if fenced else final_json))
+                    if validate:
+                        validate(record)
+                event["accepted"] = True
             except (ValueError, TypeError) as exc:
-                if attempt:
+                event.update(accepted=False, error=str(exc))
+                if trace_sink is not None:
+                    trace_sink.append(event)
+                if corrections:
                     raise ValueError(f"Invalid {phase} record: {exc}") from exc
+                corrections += 1
                 messages.extend([AIMessage(content=text), HumanMessage(content=(
-                    f"Correct the record to match the schema and constraints: {exc}. "
-                    "Return only JSON. Never invent evidence or executed outcomes."))])
-        raise AssertionError("Unreachable")
+                    f"Correct the output: {exc}. Assessment labels are optional. "
+                    "Finish with Status: need_more_thinking and no JSON, or Status: ready "
+                    "followed by one JSON object matching the schema. Never invent evidence or executed outcomes."))])
+                continue
+            if trace_sink is not None:
+                trace_sink.append(event)
+            rounds += 1
+            if status == "ready":
+                return record
+            if rounds >= self.max_thinking_rounds:
+                raise RuntimeError(f"Head {phase} thinking budget exhausted before Status: ready; no handoff generated.")
+            messages.extend([AIMessage(content=text), HumanMessage(content=(
+                "Continue the same phase using the supplied evidence and your previous assessments. "
+                f"You have {self.max_thinking_rounds - rounds} assessment round(s) left. "
+                "Choose any assessment labels or plain prose as useful. Emit final JSON only after Status: ready."))])
+        raise RuntimeError(f"Head {phase} response budget exhausted; no handoff generated.")
 
     @staticmethod
     def _context(operator_context: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,9 +205,13 @@ class HeadPlanner:
                 self._check_refs(candidate.evidence_refs, available)
 
         try:
-            proposal = self._structured("propose", payload, Proposal, validate_proposal)
-            trace.append({"phase": "propose", **proposal.model_dump()})
-            summaries = list(proposal.observations)
+            proposal_trace = {"phase": "propose", "thinking_steps": []}
+            trace.append(proposal_trace)
+            proposal = self._structured("propose", payload, Proposal, validate_proposal,
+                                        trace_sink=proposal_trace["thinking_steps"])
+            proposal_trace.update(proposal.model_dump())
+            summaries = [step["assessment"] for step in proposal_trace["thinking_steps"]
+                         if step.get("accepted") and step.get("assessment")] + list(proposal.observations)
             if proposal.mode == "stop":
                 return self.PlannerDecision(
                     None, summaries, True, proposal.stop_reason, [proposal.memory_note],
@@ -146,10 +245,12 @@ class HeadPlanner:
             # Retrieve only verbatim windows for the review; never replay the archive.
             review_memory = {**working_memory, "relevant_older_evidence": select_older_evidence(
                 raw_history, goal=user_goal, candidates=pool, feedback=working_memory["feedback"])}
+            review_trace = {"phase": "evaluate", "thinking_steps": []}
+            trace.append(review_trace)
             review = self._structured("evaluate", {**payload, "working_memory": review_memory,
                                                    "candidates_to_evaluate": pool},
-                                      CandidateReview, validate_review)
-            trace.append({"phase": "evaluate", **review.model_dump()})
+                                      CandidateReview, validate_review, trace_sink=review_trace["thinking_steps"])
+            review_trace.update(review.model_dump())
             reviewed = {item.candidate_id: item for item in review.evaluations}
             viable = []
             for node in pool:
@@ -185,6 +286,8 @@ class HeadPlanner:
                 observation_summary=candidate.observation_summary, selected_candidate_id=chosen["candidate_id"],
                 candidate_frontier=frontier, search_trace=trace)
         except Exception as exc:
+            if trace:
+                trace[-1]["error"] = str(exc)
             return self.PlannerDecision(None, [f"Head search failed: {exc}"], True,
                                         "Head search unavailable; no action generated.",
                                         candidate_frontier=frontier, search_trace=trace)
@@ -221,7 +324,8 @@ class HeadPlanner:
 
     def reflect(self, *, user_goal: str, attempt_id: str, attempt: Dict[str, Any],
                 findings: Sequence[Finding], prior_reflections: Sequence[Dict[str, Any]],
-                compilation_error: str = "", open_questions: Sequence[str] = ()) -> AttemptReflection:
+                compilation_error: str = "", open_questions: Sequence[str] = (),
+                trace_sink: List[Dict[str, Any]] | None = None) -> AttemptReflection:
         ref = f"attempt:{attempt_id}"
         forced = "compilation_failure" if compilation_error else None
         if attempt.get("status") == "denied":
@@ -260,7 +364,7 @@ class HeadPlanner:
                 "prior_reflections": list(prior_reflections), "compilation_error": compilation_error,
                 "open_questions": list(open_questions),
                 "available_evidence_refs": [ref], "required_outcome": forced,
-            }, AttemptReflection, validate)
+            }, AttemptReflection, validate, trace_sink=trace_sink)
         except Exception as exc:
             reflection = AttemptReflection(
                 attempt_id=attempt_id, outcome=forced or "inconclusive", evidence_refs=[ref],
@@ -272,13 +376,13 @@ class HeadPlanner:
         return reflection
 
     def consolidate(self, *, user_goal: str, reflections: Sequence[Dict[str, Any]],
-                    stop_reason: str) -> SessionReflection:
+                    stop_reason: str, trace_sink: List[Dict[str, Any]] | None = None) -> SessionReflection:
         # Bind lessons in the runtime; the model may summarize but cannot rewrite outcomes.
         lessons = [AttemptReflection.model_validate(item) for item in reflections]
         try:
             assessment = self._structured("reflect_session", {
                 "user_goal": user_goal, "reflections": list(reflections), "stop_reason": stop_reason,
-            }, SessionAssessment)
+            }, SessionAssessment, trace_sink=trace_sink)
             result = SessionReflection(**assessment.model_dump(), lessons=lessons)
         except Exception:
             result = SessionReflection(

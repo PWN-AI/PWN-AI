@@ -34,6 +34,7 @@ class SessionState(TypedDict, total=False):
     task_candidates: Dict[str, str]
     attempt_reflections: List[Dict[str, Any]]
     session_reflection: Dict[str, Any]
+    session_thinking_steps: List[Dict[str, Any]]
     working_memory: Dict[str, Any]  # Current-session facts/ledger/feedback; no cross-session recall.
     replan_count: int
     stop_reason: str
