@@ -31,6 +31,9 @@ class Proposal(Record):
     mode: Literal["direct", "branch", "stop"]
     candidates: list[CandidateObjective] = Field(default_factory=list, max_length=3)
     memory_note: str = Field(min_length=1)
+    # Omitted/null preserves the previous assessment; [] explicitly clears it.
+    remaining_objectives: list[str] | None = None
+    open_questions: list[str] | None = None
     stop_reason: str = ""
 
     @model_validator(mode="after")
@@ -86,6 +89,7 @@ class AttemptReflection(Record):
     next_adjustment: str = Field(min_length=1)
     retry_condition: str = Field(min_length=1)
     progress: bool
+    resolved_question: str = ""
     # Set by runtime when the reflection model is unavailable/invalid.
     source: Literal["model", "runtime"] = "model"
 

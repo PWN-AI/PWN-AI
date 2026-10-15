@@ -133,14 +133,41 @@ evidence assessments and decisions, not private internal chain-of-thought:
    and positive findings are distinguished. If reflection fails, a runtime record preserves
    uncertainty instead of inventing a lesson or successful result.
 5. **Consolidate:** every exit, including attempt-limit exits, produces a session assessment.
-   The runtime attaches the original attempt lessons unchanged to the Markdown report and
-   `<session_id>_feedback.json` in the output directory. Later sessions recall at most 20
-   validated lessons from the 10 most recent feedback artifacts, scoped to the exact same
-   target and goal. Historical feedback is guidance, not proof of the current target state.
+   The original attempt lessons are attached unchanged to the Markdown report for review.
+   No standalone feedback files are written or loaded for later sessions. Every new
+   session starts with empty history, an empty attempt ledger, and no previous feedback,
+   even when the same target, goal, and output directory are reused. Existing feedback
+   artifacts from older versions are ignored and left untouched.
 
-Only the head receives full iteration history, actual execution results, implementor RAG
-traces, findings, runtime notes, and retained feedback. `head_iterations` stores search and
-implementor traces; `candidate_frontier`, `task_candidates`, `attempt_reflections`, and
+### Current-session working memory
+
+Before each planning call the head receives `working_memory` with:
+
+- `goal_and_constraints`: the original goal/target, remaining objectives, operator constraints,
+  and runtime limits. Remaining objectives and open questions are planning assessments.
+- `verified_facts`: exact supplied target and application context, URLs with original encoded
+  queries plus parsed parameter names/values, authentication state, and analyzer findings
+  with provenance/confidence. A finding or operator input is not automatically proof of
+  a vulnerability. Attempt arguments are kept in the ledger, not promoted to facts.
+- `attempt_ledger`: every current-session attempt's objective, exact request/arguments,
+  execution status, return code/error, reflected outcome, progress, and explicitly resolved
+  question (if any). Missing reflection is labeled rather than treated as a negative result.
+- `feedback`: accumulated current-session lessons, corrections, and retry conditions.
+- `open_questions` and `candidate_objectives`: unresolved questions and retained alternatives.
+- `latest_result`: the newest actual execution output in full.
+- `relevant_older_evidence`: at most three older attempts, selected by explicit candidate
+  citations, relevance to the goal/candidates/recent feedback, then recency. Each nonempty
+  output field contributes a verbatim window of at most 1,200 characters, with field name,
+  offsets, total length, and a truncation flag. New proposal citations trigger fresh evidence
+  selection for evaluation. Exact requests, technical values, and artifact paths are retained.
+
+The runtime builds memory directly from authoritative session records; it does not repeatedly
+summarize summaries. After execution and reflection, both the ledger and feedback are updated
+**before** the next objective is chosen. Full raw executions, observations, candidate evaluations,
+and implementor RAG traces remain available in `runs` and `head_iterations` during the session,
+but are not replayed in every model prompt. The last three head memory notes and last eight
+runtime notes are included as context; they are explicitly separate from observed facts.
+`candidate_frontier`, `task_candidates`, `attempt_reflections`, `working_memory`, and
 `session_reflection` retain the planning/feedback state. There are no model-weight updates.
 Each structured phase allows one correction for invalid output. An invalid proposal or
 review stops executable handoffs. The existing `max_replans` bounds real attempts; each

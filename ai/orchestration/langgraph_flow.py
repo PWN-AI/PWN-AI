@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 from langgraph.graph import END, START, StateGraph
 
 from ai.agents.head.planner import HeadPlanner
-from ai.agents.head.memory import load_feedback
+from ai.agents.head.memory import build_working_memory
 from ai.agents.implementor.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
 from ai.contracts.schemas import ActionDecision, ExecutionResult, Finding, TargetSpec, TaskRunRecord, TaskSpec, ToolRequest
@@ -28,6 +28,18 @@ def build_phase1_graph(
     reporter: ReportGenerator,
 ) -> StateGraph:
     graph = StateGraph(SessionState)
+
+    def _working_memory(state: SessionState, iteration: int | None = None) -> Dict[str, Any]:
+        step = iteration if iteration is not None else int(state.get("replan_count", 0)) + bool(state.get("runs"))
+        return build_working_memory(
+            session_id=state["session_id"], user_goal=state["user_goal"], target=state["target"],
+            operator_context=state.get("operator_context", {}), runs=state.get("runs", []),
+            reflections=state.get("attempt_reflections", []), findings=state.get("findings", []),
+            iterations=state.get("head_iterations", []), candidates=state.get("candidate_frontier", []),
+            runtime_notes=state.get("notes", []), iteration=step,
+            constraints={"max_replans": int(state.get("max_replans", 8)),
+                         "remaining_replans": max(0, int(state.get("max_replans", 8)) - int(state.get("replan_count", 0))),
+                         "max_candidates": 3, "lookahead_depth": 2})
 
     def _compile_handoff(decision: HeadPlanner.PlannerDecision, state: SessionState,
                          task_id: str) -> tuple[List[TaskSpec], Dict[str, Dict[str, Any]], Dict[str, Any]]:
@@ -185,24 +197,31 @@ def build_phase1_graph(
         # Plan ONE task at a time — the planner picks the single most
         # important next step, executes it, observes the output, then
         # the re-planner decides what to do next.
-        prior_session_feedback = load_feedback(Path(state["output_dir"]), state["target"], state["user_goal"])
+        # A new invocation starts with empty session history even if an old output directory exists.
+        fresh: SessionState = {**state, "runs": [], "findings": [], "head_iterations": [],
+                               "candidate_frontier": [], "attempt_reflections": [], "replan_count": 0}
+        memory = _working_memory(fresh, 0)
         decision = planner.plan(
             user_goal=state["user_goal"],
             target=target,
             operator_context=operator_context,
             max_tasks=1,
-            prior_session_feedback=prior_session_feedback,
+            working_memory=memory,
         )
         _print_head_trace("Initial Plan", decision.thinking_summary, [])
         tasks, prepared_requests, iteration = _compile_handoff(decision, state, "task-01")
         existing_notes = list(state.get("notes", []))
-        planning_trace = list(state.get("planning_trace", []))
+        planning_trace = []
         planning_trace.append("Initial plan: " + " | ".join(decision.thinking_summary))
         if decision.stop_reason:
             existing_notes.append(f"Head planner stop reason: {decision.stop_reason}")
-        return {
+        updates = {
             "tasks": tasks,
             "task_index": 0,
+            "current_task": None,
+            "current_request": None,
+            "current_result": None,
+            "current_decision": None,
             "runs": [],
             "findings": [],
             "notes": existing_notes,
@@ -213,11 +232,13 @@ def build_phase1_graph(
             "candidate_frontier": decision.candidate_frontier,
             "task_candidates": {task.id: decision.selected_candidate_id for task in tasks},
             "attempt_reflections": [],
-            "prior_session_feedback": prior_session_feedback,
+            "session_reflection": {},
             "replan_count": 0,
             "finished": len(tasks) == 0,
             "stop_reason": decision.stop_reason if decision.should_stop else "",
         }
+        updates["working_memory"] = _working_memory({**fresh, **updates}, 0)
+        return updates
 
     def _select_node(state: SessionState) -> Dict[str, object]:
         idx = state.get("task_index", 0)
@@ -419,7 +440,7 @@ def build_phase1_graph(
             runtime_notes=notes,
             candidate_frontier=state.get("candidate_frontier", []),
             reflections=state.get("attempt_reflections", []),
-            prior_session_feedback=state.get("prior_session_feedback", []),
+            working_memory=state.get("working_memory") or _working_memory(state),
         )
         _print_head_trace(
             f"Adaptive Re-plan #{replan_count + 1} (after {current_task.id})",
@@ -476,6 +497,9 @@ def build_phase1_graph(
                 "head_iterations": head_iterations,
                 "candidate_frontier": decision.candidate_frontier,
                 "task_candidates": task_candidates,
+                "working_memory": _working_memory({**state, "head_iterations": head_iterations,
+                                                     "candidate_frontier": decision.candidate_frontier,
+                                                     "notes": notes, "replan_count": replan_count + 1}, replan_count + 1),
             }
 
         return {
@@ -490,6 +514,9 @@ def build_phase1_graph(
             "head_iterations": head_iterations,
             "candidate_frontier": decision.candidate_frontier,
             "task_candidates": task_candidates,
+            "working_memory": _working_memory({**state, "head_iterations": head_iterations,
+                                                 "candidate_frontier": decision.candidate_frontier,
+                                                 "notes": notes, "replan_count": replan_count + 1}, replan_count + 1),
             "stop_reason": ("No new executable objective remained after duplicate/cap checks."
                             if queue_empty else state.get("stop_reason", "")),
         }
@@ -507,14 +534,17 @@ def build_phase1_graph(
             return {}
         reflection = planner.reflect(
             user_goal=state["user_goal"], attempt_id=run.task.id, attempt=run.model_dump(),
-            findings=state.get("findings", []), prior_reflections=reflections)
+            findings=state.get("findings", []), prior_reflections=reflections,
+            open_questions=state.get("working_memory", {}).get("open_questions", []))
         reflections.append(reflection.model_dump())
         frontier = [dict(node) for node in state.get("candidate_frontier", [])]
         candidate_id = state.get("task_candidates", {}).get(run.task.id)
         for node in frontier:
             if node["candidate_id"] == candidate_id:
                 node.update(status="attempted", attempt_id=run.task.id, outcome=reflection.outcome)
-        return {"attempt_reflections": reflections, "candidate_frontier": frontier}
+        updates = {"attempt_reflections": reflections, "candidate_frontier": frontier}
+        updates["working_memory"] = _working_memory({**state, **updates})
+        return updates
 
     def _report_node(state: SessionState) -> Dict[str, object]:
         reflections = list(state.get("attempt_reflections", []))
@@ -527,7 +557,8 @@ def build_phase1_graph(
                 reflection = planner.reflect(
                     user_goal=state["user_goal"], attempt_id=iteration["task_id"], attempt=iteration,
                     compilation_error=iteration["compilation_error"],
-                    findings=state.get("findings", []), prior_reflections=reflections)
+                    findings=state.get("findings", []), prior_reflections=reflections,
+                    open_questions=state.get("working_memory", {}).get("open_questions", []))
                 reflections.append(reflection.model_dump())
                 for node in frontier:
                     if node["candidate_id"] == iteration.get("selected_candidate_id"):
@@ -536,19 +567,6 @@ def build_phase1_graph(
         session_reflection = planner.consolidate(
             user_goal=state["user_goal"], reflections=reflections,
             stop_reason=state.get("stop_reason", "") or "No further objectives queued.")
-        output_dir = Path(state["output_dir"])
-        output_dir.mkdir(parents=True, exist_ok=True)
-        feedback_path = output_dir / f"{state['session_id']}_feedback.json"
-        feedback_path.write_text(json.dumps({
-            "session_id": state["session_id"], "target": state["target"],
-            "user_goal": state["user_goal"], **session_reflection.model_dump(),
-            "search_history": [{
-                "task_id": iteration["task_id"],
-                "selected_candidate_id": iteration.get("selected_candidate_id", ""),
-                "search_trace": iteration.get("search_trace", []),
-                "compilation_error": iteration.get("compilation_error", ""),
-            } for iteration in state.get("head_iterations", [])],
-        }, indent=2, ensure_ascii=False), encoding="utf-8")
         report_path = reporter.write_markdown_report(
             output_dir=Path(state["output_dir"]),
             session_id=state["session_id"],
@@ -563,8 +581,9 @@ def build_phase1_graph(
             session_reflection=session_reflection.model_dump(),
         )
         return {"report_path": str(report_path), "attempt_reflections": reflections,
-                "session_reflection": session_reflection.model_dump(), "feedback_path": str(feedback_path),
-                "candidate_frontier": frontier}
+                "session_reflection": session_reflection.model_dump(), "candidate_frontier": frontier,
+                "working_memory": _working_memory({**state, "attempt_reflections": reflections,
+                                                    "candidate_frontier": frontier})}
 
     graph.add_node("plan_tasks", _plan_node)
     graph.add_node("select_task", _select_node)

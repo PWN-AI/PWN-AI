@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from ai.agents.head.contracts import (
     AttemptReflection, CandidateObjective, CandidateReview, Proposal, SessionAssessment, SessionReflection,
 )
+from ai.agents.head.memory import build_working_memory, select_older_evidence
 from ai.agents.react_agent import _extract_message_text
 from ai.contracts.schemas import ExecutionResult, Finding, TargetSpec, TaskSpec
 
@@ -91,17 +92,15 @@ class HeadPlanner:
             raise ValueError("Evidence references must identify supplied context, attempts, or findings.")
 
     def _search(self, *, user_goal: str, target: TargetSpec, operator_context: Dict[str, Any],
-                evidence: Dict[str, Any], candidate_frontier: Sequence[Dict[str, Any]] = (),
-                force_branch: bool = False) -> PlannerDecision:
+                working_memory: Dict[str, Any], candidate_frontier: Sequence[Dict[str, Any]] = (),
+                raw_history: Sequence[Dict[str, Any]] = (), force_branch: bool = False) -> PlannerDecision:
         context = self._context(operator_context)
         frontier = [dict(node) for node in candidate_frontier]
         trace: List[Dict[str, Any]] = []
         available = {"context"}
-        available.update(f"attempt:{run['task']['id']}" for run in evidence.get("execution_history", []))
-        available.update(f"finding:{item['finding_id']}" for item in evidence.get("findings", []))
-        payload = {"user_goal": user_goal, "target": target.model_dump(exclude_none=True),
-                   "current_context": context, "head_memory_and_evidence": evidence,
-                   "candidate_frontier": frontier, "available_evidence_refs": sorted(available),
+        available.update(working_memory["history_index"]["attempt_refs"])
+        available.update(item["evidence_ref"] for item in working_memory["verified_facts"]["findings"])
+        payload = {"working_memory": working_memory, "available_evidence_refs": sorted(available),
                    "force_branch": force_branch, "max_candidates": 3, "lookahead_depth": 2}
 
         def validate_proposal(proposal: Proposal) -> None:
@@ -119,7 +118,7 @@ class HeadPlanner:
                     None, summaries, True, proposal.stop_reason, [proposal.memory_note],
                     observations=proposal.observations, candidate_frontier=frontier, search_trace=trace)
 
-            iteration = evidence.get("iteration", 0)
+            iteration = working_memory["scope"]["iteration"]
             parent = next((node["candidate_id"] for node in reversed(frontier)
                            if node.get("status") == "attempted"), None)
             new_nodes = [{"candidate_id": f"branch-{iteration:02d}-{index:02d}",
@@ -143,7 +142,12 @@ class HeadPlanner:
                 for item in review.evaluations:
                     self._check_refs(item.evidence_refs, available)
 
-            review = self._structured("evaluate", {**payload, "candidates_to_evaluate": pool},
+            # New proposals may cite an older attempt that was not relevant before this call.
+            # Retrieve only verbatim windows for the review; never replay the archive.
+            review_memory = {**working_memory, "relevant_older_evidence": select_older_evidence(
+                raw_history, goal=user_goal, candidates=pool, feedback=working_memory["feedback"])}
+            review = self._structured("evaluate", {**payload, "working_memory": review_memory,
+                                                   "candidates_to_evaluate": pool},
                                       CandidateReview, validate_review)
             trace.append({"phase": "evaluate", **review.model_dump()})
             reviewed = {item.candidate_id: item for item in review.evaluations}
@@ -154,6 +158,7 @@ class HeadPlanner:
                 node["score"] = evaluation.score
                 missing = evaluation.unmet_prerequisites or (
                     node["candidate"]["missing_prerequisites"] if node in new_nodes else [])
+                node["unmet_prerequisites"] = list(missing)
                 node["status"] = "defer" if missing else evaluation.disposition
                 summaries.append(f"Candidate {node['candidate_id']}: {node['status']} "
                                  f"(score {node['score']}) — {evaluation.assessment}")
@@ -185,10 +190,12 @@ class HeadPlanner:
                                         candidate_frontier=frontier, search_trace=trace)
 
     def plan(self, *, user_goal: str, target: TargetSpec, operator_context: Dict[str, Any],
-             max_tasks: int = 6, prior_session_feedback: Sequence[Dict[str, Any]] = ()) -> PlannerDecision:
+             max_tasks: int = 6, working_memory: Dict[str, Any] | None = None) -> PlannerDecision:
+        memory = working_memory if working_memory is not None else build_working_memory(
+            session_id="", user_goal=user_goal, target=target.model_dump(exclude_none=True),
+            operator_context=operator_context)
         return self._search(user_goal=user_goal, target=target, operator_context=operator_context,
-                            evidence={"stage": "initial", "memory": [], "iteration": 0,
-                                      "prior_session_feedback": list(prior_session_feedback)}, force_branch=True)
+                            working_memory=memory, force_branch=True)
 
     def replan(self, *, user_goal: str, target: TargetSpec, operator_context: Dict[str, Any],
                current_task: TaskSpec, current_result: ExecutionResult,
@@ -198,23 +205,23 @@ class HeadPlanner:
                execution_history: Sequence[Dict[str, Any]] = (), runtime_notes: Sequence[str] = (),
                candidate_frontier: Sequence[Dict[str, Any]] = (),
                reflections: Sequence[Dict[str, Any]] = (),
-               prior_session_feedback: Sequence[Dict[str, Any]] = ()) -> PlannerDecision:
+               working_memory: Dict[str, Any] | None = None) -> PlannerDecision:
         latest = reflections[-1] if reflections else {}
+        # Raw records are kept outside the model payload; the memory builder selects excerpts.
+        runs = list(execution_history) or [{"task": current_task.model_dump(),
+                                           "result": current_result.model_dump()}]
+        memory = working_memory if working_memory is not None else build_working_memory(
+            session_id="", user_goal=user_goal, target=target.model_dump(exclude_none=True),
+            operator_context=operator_context, runs=runs, reflections=reflections, findings=findings,
+            iterations=iteration_history, candidates=candidate_frontier, runtime_notes=runtime_notes,
+            iteration=replan_iteration + 1)
         return self._search(user_goal=user_goal, target=target, operator_context=operator_context,
-                            candidate_frontier=candidate_frontier,
-                            force_branch=not current_result.success or not latest.get("progress", False),
-                            evidence={"stage": "after_execution", "memory": list(prior_notes),
-                                      "iteration": replan_iteration + 1, "iteration_history": list(iteration_history),
-                                      "execution_history": list(execution_history), "runtime_notes": list(runtime_notes),
-                                      "reflections": list(reflections), "task": current_task.model_dump(),
-                                      "prior_session_feedback": list(prior_session_feedback),
-                                      "result": current_result.model_dump(),
-                                      "findings": [finding.model_dump() for finding in findings],
-                                      "remaining_tasks": [task.model_dump() for task in remaining_tasks]})
+                            candidate_frontier=candidate_frontier, working_memory=memory, raw_history=runs,
+                            force_branch=not current_result.success or not latest.get("progress", False))
 
     def reflect(self, *, user_goal: str, attempt_id: str, attempt: Dict[str, Any],
                 findings: Sequence[Finding], prior_reflections: Sequence[Dict[str, Any]],
-                compilation_error: str = "") -> AttemptReflection:
+                compilation_error: str = "", open_questions: Sequence[str] = ()) -> AttemptReflection:
         ref = f"attempt:{attempt_id}"
         forced = "compilation_failure" if compilation_error else None
         if attempt.get("status") == "denied":
@@ -237,6 +244,9 @@ class HeadPlanner:
             self._check_refs(record.evidence_refs, {ref})
             if forced and record.outcome != forced:
                 raise ValueError(f"Recorded execution status requires outcome={forced}.")
+            if record.resolved_question and (record.resolved_question not in open_questions or
+                                             record.outcome not in {"positive", "negative"}):
+                raise ValueError("Only a supplied open question resolved by a conclusive result may be closed.")
             if record.outcome in {"compilation_failure", "denied", "timeout", "execution_failure",
                                   "authentication_failure", "inconclusive"} and record.progress:
                 raise ValueError("An incomplete/failed attempt cannot claim verified progress.")
@@ -246,6 +256,7 @@ class HeadPlanner:
                 "user_goal": user_goal, "attempt_id": attempt_id, "attempt": attempt,
                 "findings": [finding.model_dump() for finding in findings],
                 "prior_reflections": list(prior_reflections), "compilation_error": compilation_error,
+                "open_questions": list(open_questions),
                 "available_evidence_refs": [ref], "required_outcome": forced,
             }, AttemptReflection, validate)
         except Exception as exc:

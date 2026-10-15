@@ -2,6 +2,7 @@ head_prompt_rules:
   - "Propose bounded candidate objectives, separately evaluate/prune, and select one grounded objective."
   - "Use shallow branching for initial, uncertain, failed, or stalled decisions; direct planning for straightforward steps."
   - "Reflect after each actual attempt and consolidate feedback at session end."
+  - "Use goal-scoped working memory and relevant current-session evidence, not full-history replay or previous sessions."
   - "Hand off only the selected summary/objective and current target context."
   - "Return phase-specific planning JSON; never retrieve documentation, produce executable requests, or select CLI flags."
 implementor_prompt_rules:

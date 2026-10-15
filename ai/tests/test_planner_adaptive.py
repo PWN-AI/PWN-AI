@@ -266,14 +266,16 @@ def test_graph_head_only_memory_and_stateless_implementor(tmp_path):
     ]
     assert state["head_iterations"][0]["implementor_steps"][0]["retrieval_observation"].startswith("REAL DOCUMENTATION")
     propose_calls = [call for call in head.calls if json.loads(call[1].content)["phase"] == "propose"]
-    final_head_input = json.loads(propose_calls[2][1].content)["head_memory_and_evidence"]
-    assert len(final_head_input["execution_history"]) == 2
-    assert [run["request"]["task_id"] for run in final_head_input["execution_history"]] == ["task-01", "task-02"]
-    assert final_head_input["execution_history"][0]["result"]["stdout"] == "execution evidence"
-    assert final_head_input["iteration_history"] == state["head_iterations"][:2]
-    assert final_head_input["reflections"] == state["attempt_reflections"]
-    first_replan_input = json.loads(propose_calls[1][1].content)["head_memory_and_evidence"]
-    assert first_replan_input["reflections"][0]["attempt_id"] == "task-01"
+    final_head_input = json.loads(propose_calls[2][1].content)["working_memory"]
+    assert len(final_head_input["attempt_ledger"]) == 2
+    assert [run["attempt_id"] for run in final_head_input["attempt_ledger"]] == ["task-01", "task-02"]
+    assert final_head_input["latest_result"]["result"]["stdout"] == "execution evidence"
+    assert "iteration_history" not in final_head_input
+    assert "execution_history" not in final_head_input
+    assert final_head_input["feedback"] == state["attempt_reflections"]
+    first_replan_input = json.loads(propose_calls[1][1].content)["working_memory"]
+    assert first_replan_input["feedback"][0]["attempt_id"] == "task-01"
+    assert first_replan_input["attempt_ledger"][0]["outcome"] == "negative"
     assert "initial private memory" in propose_calls[1][1].content
     assert "execution evidence" in propose_calls[1][1].content
     assert "second private memory" in propose_calls[2][1].content

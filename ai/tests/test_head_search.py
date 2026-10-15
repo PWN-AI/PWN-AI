@@ -201,7 +201,7 @@ def graph_run(tmp_path, head, *, runner=None, approver=None, max_replans=0):
     return result, runner
 
 
-def test_last_budgeted_attempt_is_reflected_and_feedback_is_persisted_in_report(tmp_path):
+def test_last_budgeted_attempt_is_reflected_in_session_memory_and_report(tmp_path):
     head = HeadLLM(observation())
     state, runner = graph_run(tmp_path, head)
     assert len(runner.requests) == 1
@@ -209,10 +209,9 @@ def test_last_budgeted_attempt_is_reflected_and_feedback_is_persisted_in_report(
         "propose", "evaluate", "reflect_attempt", "reflect_session"]
     assert len(state["attempt_reflections"]) == 1
     assert "limit" in state["stop_reason"]
-    feedback = json.loads(Path(state["feedback_path"]).read_text())
-    assert feedback["lessons"] == state["attempt_reflections"]
-    assert len(feedback["search_history"][0]["search_trace"]) == 2
-    assert feedback["search_history"][0]["selected_candidate_id"] == state["task_candidates"]["task-01"]
+    assert not list(tmp_path.glob("*_feedback.json"))
+    assert state["working_memory"]["feedback"] == state["attempt_reflections"]
+    assert state["working_memory"]["attempt_ledger"][0]["outcome"] == "negative"
     report = Path(state["report_path"]).read_text()
     assert "## Session Reflection" in report
     assert "task-01: negative" in report
@@ -247,7 +246,7 @@ def test_working_frontier_remains_bounded_across_repeated_branching():
             if payload["phase"] == "propose":
                 self.calls.append(list(messages))
                 data = proposal()
-                iteration = payload["head_memory_and_evidence"]["iteration"]
+                iteration = payload["working_memory"]["scope"]["iteration"]
                 for index, candidate in enumerate(data["candidates"]):
                     candidate["objective"] = f"Objective {iteration}-{index}"
                 return SimpleNamespace(content=json.dumps(data))
@@ -274,25 +273,22 @@ def test_completed_negative_test_is_distinct_from_execution_failure():
     assert result.outcome == "negative" and result.progress and result.source == "model"
 
 
-def test_later_session_recalls_only_matching_target_and_goal(tmp_path):
+def test_later_session_starts_fresh_and_never_reads_or_writes_feedback_files(tmp_path):
+    # An artifact from the removed cross-session system must not influence new sessions.
+    marker = "PRIOR_SESSION_FEEDBACK_MUST_NOT_BE_LOADED"
+    old_file = tmp_path / "prior_feedback.json"
+    old_file.write_text(json.dumps({"target": {"url": URL}, "user_goal": "Check target",
+                                    "lessons": [{**reflection(), "lesson": marker}]}))
     first, _ = graph_run(tmp_path, HeadLLM(observation()))
-    head = HeadLLM(observation(decision="stop", next_step="Review previous feedback before obtaining new evidence"))
+    head = HeadLLM(observation(decision="stop", next_step="Required evidence is unavailable"))
     second, _ = graph_run(tmp_path, head)
-    recalled = second["prior_session_feedback"]
-    assert recalled[0]["reflection"] == first["attempt_reflections"][0]
-    supplied = json.loads(head.calls[0][1].content)["head_memory_and_evidence"]["prior_session_feedback"]
-    assert supplied == recalled
-    from ai.agents.head.memory import load_feedback
-    assert load_feedback(tmp_path, {"url": URL + "&different=1"}, "Check target") == []
-    assert load_feedback(tmp_path, {"url": URL}, "A different goal") == []
-
-
-def test_feedback_recall_is_bounded_and_ignores_malformed_records(tmp_path):
-    from ai.agents.head.memory import load_feedback
-    record = {"target": {"url": URL}, "user_goal": "Check target", "session_id": "prior",
-              "lessons": [reflection()] * 25}
-    (tmp_path / "prior_feedback.json").write_text(json.dumps(record))
-    (tmp_path / "broken_feedback.json").write_text('{"lessons":')
-    (tmp_path / "invalid_feedback.json").write_text(json.dumps({**record, "lessons": [{"outcome": "invented"}]}))
-    assert len(load_feedback(tmp_path, {"url": URL}, "Check target")) == 20
-    assert load_feedback(tmp_path, {"url": URL}, "Check target", limit=0) == []
+    assert marker not in str(head.calls)
+    initial_memory = json.loads(head.calls[0][1].content)["working_memory"]
+    assert initial_memory["feedback"] == []
+    assert initial_memory["attempt_ledger"] == []
+    assert initial_memory["latest_result"] is None
+    assert initial_memory["candidate_objectives"] == []
+    assert first["working_memory"]["feedback"]
+    assert second["working_memory"]["feedback"] == []
+    assert list(tmp_path.glob("*_feedback.json")) == [old_file]
+    assert marker in old_file.read_text()

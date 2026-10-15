@@ -251,7 +251,6 @@ def main() -> None:
     print(f"Runs executed: {len(final_state.get('runs', []))}")
     print(f"Findings generated: {len(final_state.get('findings', []))}")
     print(f"Report path: {final_state.get('report_path')}")
-    print(f"Feedback path: {final_state.get('feedback_path')}")
 
     if args.print_final_state:
         serializable = {}
