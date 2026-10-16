@@ -126,8 +126,9 @@ class AIService {
         if (params.maxReplans !== undefined) {
             args.push('--max-replans', params.maxReplans.toString());
         }
-        if (params.maxNewTasksPerReplan !== undefined) {
-            args.push('--max-new-tasks-per-replan', params.maxNewTasksPerReplan.toString());
+        const maxActions = params.maxActionsPerObjective ?? params.maxNewTasksPerReplan;
+        if (maxActions !== undefined) {
+            args.push('--max-actions-per-objective', maxActions.toString());
         }
         return args;
     }

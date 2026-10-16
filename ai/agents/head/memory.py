@@ -53,17 +53,16 @@ def _excerpt(text: str, terms: set[str], *, field: str) -> dict[str, Any]:
 
 
 def select_older_evidence(runs: Sequence[Mapping[str, Any]], *, goal: str,
-                          candidates: Sequence[Mapping[str, Any]],
                           feedback: Sequence[Mapping[str, Any]],
                           focus: Sequence[Mapping[str, Any]] = ()) -> list[dict[str, Any]]:
     """Retrieve relevant verbatim windows; never modify the underlying archive.
 
-    Explicit candidate citations rank first, followed by overlap with objectives,
+    Explicit objective citations rank first, followed by overlap with objectives,
     unresolved prerequisites and recent feedback. Recency breaks ties. The newest
     execution is supplied separately in full and is excluded here.
     """
-    objectives = [node.get("candidate", node) for node in candidates] + list(focus)
-    refs = {ref for candidate in objectives for ref in candidate.get("evidence_refs", [])}
+    objectives = list(focus)
+    refs = {ref for objective in objectives for ref in objective.get("evidence_refs", [])}
     terms = _tokens([goal, objectives, list(feedback)[-3:]])
     ranked = []
     for index, run in enumerate(runs[:-1]):
@@ -89,13 +88,12 @@ def build_working_memory(*, session_id: str, user_goal: str, target: Mapping[str
                          operator_context: Mapping[str, Any],
                          runs: Sequence[Any] = (), reflections: Sequence[Any] = (),
                          findings: Sequence[Any] = (), iterations: Sequence[Mapping[str, Any]] = (),
-                         candidates: Sequence[Mapping[str, Any]] = (),
                          runtime_notes: Sequence[str] = (), constraints: Mapping[str, Any] | None = None,
                          iteration: int = 0, focus: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     """Rebuild from authoritative records, avoiding recursive summary drift.
 
     Facts retain exact supplied values and provenance. Requests are attempts, not
-    proof that their parameters or hypotheses are valid. Model notes and candidate
+    proof that their parameters or hypotheses are valid. Model notes and objective
     assessments remain separate from runtime-observed context and finding evidence.
     """
     records = [_dump(run) for run in runs]
@@ -159,19 +157,14 @@ def build_working_memory(*, session_id: str, user_goal: str, target: Mapping[str
     order = {entry["task_id"]: index for index, entry in enumerate(iterations) if entry.get("task_id")}
     ledger.sort(key=lambda item: order.get(item["attempt_id"], len(order)))
     proposals = [record for entry in reversed(iterations)
-                 for record in reversed(entry.get("search_trace", [])) if record.get("phase") == "propose"]
+                 for record in reversed(entry.get("search_trace", [])) if record.get("phase") == "plan_objective"]
     latest_proposal = proposals[0] if proposals else {}
     remaining = next((record["remaining_objectives"] for record in proposals
                       if record.get("remaining_objectives") is not None), None)
     if remaining is None:
-        remaining = [] if latest_proposal.get("mode") == "stop" else [
-            node["candidate"]["objective"] for node in candidates if node.get("status") not in {"attempted", "prune"}]
+        remaining = [latest_proposal["objective"]] if latest_proposal.get("decision") == "continue" else []
     questions = list(next((record["open_questions"] for record in proposals
                            if record.get("open_questions") is not None), []))
-    for node in candidates:
-        if node.get("status") not in {"attempted", "prune"}:
-            questions.extend(node.get("unmet_prerequisites", node.get("evaluation", {}).get(
-                "unmet_prerequisites", node.get("candidate", {}).get("missing_prerequisites", []))))
     latest = records[-1] if records else None
     resolved = {item.get("resolved_question", "").casefold() for item in feedback
                 if item.get("resolved_question") and item.get("outcome") in {"positive", "negative"}}
@@ -181,19 +174,18 @@ def build_working_memory(*, session_id: str, user_goal: str, target: Mapping[str
                                  "runtime_limits": dict(constraints or {}),
                                  "operator_constraints": operator_context.get("constraints", []),
                                  "remaining_objectives": remaining,
-                                 "planning_status": {"mode": latest_proposal.get("mode", "initial"),
+                                 "planning_status": {"mode": latest_proposal.get("decision", "initial"),
                                                      "stop_reason": latest_proposal.get("stop_reason", "")}},
         "verified_facts": facts,
         "attempt_ledger": ledger,
         "feedback": feedback,
         "open_questions": list(dict.fromkeys(question for question in questions if question.casefold() not in resolved)),
-        "candidate_objectives": list(candidates),
+        "active_objective": latest_proposal.get("objective") or None,
         "latest_result": {"evidence_ref": f"attempt:{latest['task']['id']}",
                           "request": latest.get("request", {}), "result": latest.get("result", {})} if latest else None,
-        "relevant_older_evidence": select_older_evidence(records, goal=user_goal, candidates=candidates,
-                                                        feedback=feedback, focus=focus),
+        "relevant_older_evidence": select_older_evidence(records, goal=user_goal, feedback=feedback, focus=focus),
         "planning_notes": [{"task_id": entry.get("task_id"), "notes": entry.get("memory_notes", [])}
-                           for entry in list(iterations)[-3:]],
+                           for entry in [item for item in iterations if item.get("memory_notes")][-3:]],
         "runtime_notes": list(runtime_notes)[-8:],
         "history_index": {"attempt_refs": [item["evidence_ref"] for item in ledger],
                           "iteration_count": len(iterations), "raw_history_available_in_session": True},

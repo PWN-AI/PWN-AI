@@ -136,6 +136,7 @@ export const chatController = {
         printFinalState,
         maxTasks,
         maxReplans,
+        maxActionsPerObjective,
         maxNewTasksPerReplan,
         stream,
       } = req.body;
@@ -188,6 +189,7 @@ export const chatController = {
         printFinalState,
         maxTasks,
         maxReplans,
+        maxActionsPerObjective,
         maxNewTasksPerReplan,
       };
 

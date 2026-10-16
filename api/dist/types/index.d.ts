@@ -59,6 +59,7 @@ export interface SessionParams {
     printFinalState?: boolean;
     maxTasks?: number;
     maxReplans?: number;
+    maxActionsPerObjective?: number;
     maxNewTasksPerReplan?: number;
 }
 //# sourceMappingURL=index.d.ts.map

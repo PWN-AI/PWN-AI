@@ -6,9 +6,20 @@ ready to be injected into LLM reasoning scratchpads.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Optional
 
 from ai.rag.vector_store import ToolVectorStore
+
+
+@dataclass(frozen=True)
+class RetrievedDocumentation:
+    """Document text and authoritative identities from the returned store records.
+
+    Never infer eligibility from the query or parse identity claims out of document text.
+    """
+    text: str
+    tools: tuple[str, ...]
 
 
 class ToolRetriever:
@@ -27,6 +38,10 @@ class ToolRetriever:
 
         Returns a formatted string suitable for LLM consumption.
         """
+        return self.retrieve_result(query, top_k=top_k, tool_filter=tool_filter).text
+
+    def retrieve_result(self, query: str, top_k: int = 4,
+                        tool_filter: Optional[str] = None) -> RetrievedDocumentation:
         if not self.store.is_ready:
             raise RuntimeError("RAG knowledge base not initialized.")
 
@@ -42,14 +57,20 @@ class ToolRetriever:
             parts.append(doc["content"])
         parts.append("\n=== End Retrieved Documentation ===")
 
-        return "\n".join(parts)
+        return RetrievedDocumentation("\n".join(parts), tuple(sorted({doc["tool"] for doc, _ in results})))
 
     def retrieve_for_tool(self, tool_name: str, query: str, top_k: int = 3) -> str:
         """Retrieve documentation specifically for one tool."""
         return self.retrieve(query, top_k=top_k, tool_filter=tool_name)
 
+    def retrieve_for_tool_result(self, tool_name: str, query: str, top_k: int = 3) -> RetrievedDocumentation:
+        return self.retrieve_result(query, top_k=top_k, tool_filter=tool_name)
+
     def retrieve_all_for_tool(self, tool_name: str) -> str:
         """Retrieve ALL documentation for a specific tool."""
+        return self.retrieve_all_for_tool_result(tool_name).text
+
+    def retrieve_all_for_tool_result(self, tool_name: str) -> RetrievedDocumentation:
         if not self.store.is_ready:
             raise RuntimeError("RAG knowledge base not initialized.")
 
@@ -66,4 +87,4 @@ class ToolRetriever:
             parts.append(doc["content"])
         parts.append(f"\n=== End {tool_name} Documentation ===")
 
-        return "\n".join(parts)
+        return RetrievedDocumentation("\n".join(parts), tuple(sorted({doc["tool"] for doc in docs})))

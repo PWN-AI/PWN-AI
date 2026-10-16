@@ -77,5 +77,6 @@ export interface SessionParams {
   printFinalState?: boolean;   // default: false
   maxTasks?: number;
   maxReplans?: number;
-  maxNewTasksPerReplan?: number;
+  maxActionsPerObjective?: number;
+  maxNewTasksPerReplan?: number; // Legacy alias for maxActionsPerObjective
 }

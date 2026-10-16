@@ -21,6 +21,7 @@ class ReportGenerator:
         planning_trace: List[str],
         stop_reason: str = "",
         session_reflection: Dict[str, Any] | None = None,
+        objective_feedback: List[Dict[str, Any]] | None = None,
     ) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
         report_path = output_dir / f"{session_id}_report.md"
@@ -101,6 +102,17 @@ class ReportGenerator:
                 lines.append(f"  - Confidence: {finding.confidence:.2f}")
                 lines.append(f"  - Evidence: {finding.evidence[:300]}")
         lines.append("")
+
+        if objective_feedback:
+            lines.extend(["## Objective Feedback", ""])
+            for review in objective_feedback:
+                assessment = review.get("implementor_report", {})
+                lines.extend([f"### {review['objective_id']}", review["summary"],
+                              f"- Implementor assessment: {assessment.get('status', 'inconclusive')}",
+                              str(assessment.get("summary", "")), ""])
+                for uncertainty in assessment.get("remaining_uncertainty", []):
+                    lines.append(f"- Unresolved: {uncertainty}")
+                lines.append("")
 
         if session_reflection:
             lines.extend(["## Session Reflection", str(session_reflection.get("summary", "")), ""])

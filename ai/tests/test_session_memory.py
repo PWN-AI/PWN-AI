@@ -4,8 +4,8 @@ import json
 
 from ai.agents.head.memory import EXCERPT_CHARS, MAX_OLDER_ATTEMPTS, build_working_memory
 from ai.contracts.schemas import ExecutionResult, TargetSpec
-from ai.tests.test_head_search import proposal, review, task
-from ai.tests.test_planner_adaptive import LLM, URL, planner
+from ai.tests.test_head_search import proposal, task
+from ai.tests.test_planner_adaptive import LLM, URL, planner, reviewer
 
 
 def run(index, stdout="raw result", **result_changes):
@@ -33,7 +33,7 @@ def memory(**kwargs):
 def test_all_working_memory_sections_exist_and_new_session_has_no_attempts():
     result = memory()
     assert result["goal_and_constraints"]["goal"] == "Inspect input handling"
-    assert result["attempt_ledger"] == result["feedback"] == result["candidate_objectives"] == []
+    assert result["attempt_ledger"] == result["feedback"] == []
     assert result["open_questions"] == result["relevant_older_evidence"] == []
     assert result["latest_result"] is None
     assert result["verified_facts"]["target"]["value"] == {"url": URL}
@@ -82,12 +82,12 @@ def test_large_archive_is_retained_but_only_latest_output_and_bounded_older_wind
     records = [run(index, f"Archive marker {index}\n" + "Z" * 50000) for index in range(1, 13)]
     untouched = deepcopy(records)
     candidate = {"candidate_id": "branch-12-01", "status": "viable", "candidate": {
-        **proposal()["candidates"][0], "evidence_refs": ["attempt:task-01", "attempt:task-03"]}}
+        **proposal(), "evidence_refs": ["attempt:task-01", "attempt:task-03"]}}
     iterations = [{"task_id": "task-01", "memory_notes": ["Brief current-goal note"],
                    "implementor_steps": [{"retrieval_observation": "RAW_RAG_ARCHIVE_MUST_STAY_OUT"}],
                    "observations": ["OLD_FULL_OBSERVATION_MUST_STAY_OUT"], "search_trace": []}]
     result = memory(runs=records, reflections=[feedback(index) for index in range(1, 13)],
-                    candidates=[candidate], iterations=iterations)
+                    focus=[candidate["candidate"]], iterations=iterations)
     assert len(result["attempt_ledger"]) == 12
     assert len(result["relevant_older_evidence"]) <= MAX_OLDER_ATTEMPTS
     assert result["latest_result"]["result"]["stdout"] == records[-1]["result"]["stdout"]
@@ -105,34 +105,20 @@ def test_large_archive_is_retained_but_only_latest_output_and_bounded_older_wind
     assert records == untouched
 
 
-def test_evaluation_selects_an_older_cited_attempt_after_new_proposals_identify_it():
-    # Raw evidence near the middle of an old result must be retrievable, not just its first characters.
+def test_scoped_evidence_selection_can_retrieve_an_exact_older_value_by_reference():
+    from ai.agents.head.memory import select_older_evidence
     anchor = "Unique_Observed_Parameter_Identifier"
     records = [run(1, "x" * 60000 + "\n" + anchor + "=Case%2FValue\n" + "z" * 60000)]
     records.extend(run(index, "unrelated execution text") for index in range(2, 9))
-    data = proposal()
-    data["candidates"][0].update(objective=f"Validate {anchor}", evidence_refs=["attempt:task-01"])
-    scores = review(["branch-01-01", "branch-01-02"])
-    llm = LLM(json.dumps(data), json.dumps(scores))
-    head = planner(llm)
-    decision = head.replan(user_goal="Inspect inputs", target=TargetSpec(url=URL), operator_context={},
-                           current_task=task(), current_result=ExecutionResult(tool_name="nuclei_xss", action="scan", success=True, returncode=0),
-                           findings=[], remaining_tasks=[], execution_history=records, reflections=[feedback(8)])
-    assert decision.handoff is not None
-    evaluated = json.loads(llm.calls[1][1].content)["working_memory"]
-    selected = next(item for item in evaluated["relevant_older_evidence"] if item["evidence_ref"] == "attempt:task-01")
+    windows = select_older_evidence(records, goal="Inspect inputs", feedback=[],
+                                    focus=[{"objective": f"Validate {anchor}", "evidence_refs": ["attempt:task-01"]}])
+    selected = next(item for item in windows if item["evidence_ref"] == "attempt:task-01")
     assert anchor + "=Case%2FValue" in selected["excerpts"][0]["text"]
-    assert selected["excerpts"][0]["start"] > 0
-    assert selected["excerpts"][0]["truncated"]
-    for call in llm.calls:
-        payload = json.loads(call[1].content)
-        assert "head_memory_and_evidence" not in payload
-        assert "execution_history" not in payload and "iteration_history" not in payload
-        assert records[0]["result"]["stdout"] not in call[1].content
+    assert selected["excerpts"][0]["start"] > 0 and selected["excerpts"][0]["truncated"]
 
 
 def test_open_questions_remaining_objectives_and_compilation_failure_are_current_session_records():
-    planned = {"phase": "propose", **proposal(open_questions=["Is the observed input authenticated?"],
+    planned = {"phase": "plan_objective", **proposal(open_questions=["Is the observed input authenticated?"],
                                              remaining_objectives=["Resolve input handling"])}
     iteration = {"task_id": "task-01", "next_step": "Validate observed input", "compilation_error": "RAG unavailable",
                  "memory_notes": ["Input remains untested"], "search_trace": [planned]}
@@ -146,28 +132,35 @@ def test_open_questions_remaining_objectives_and_compilation_failure_are_current
 
 def test_only_explicitly_resolved_questions_leave_working_memory():
     question = "Does the observed endpoint require authentication?"
-    planned = {"phase": "propose", **proposal(open_questions=[question, "What inputs remain untested?"])}
+    planned = {"phase": "plan_objective", **proposal(open_questions=[question, "What inputs remain untested?"])}
     record = {**feedback(1), "resolved_question": question}
     llm = LLM(json.dumps(record))
-    validated = planner(llm).reflect(user_goal="Inspect input handling", attempt_id="task-01", attempt=run(1),
+    validated = reviewer(llm).reflect(user_goal="Inspect input handling", attempt_id="task-01", attempt=run(1),
                                      findings=[], prior_reflections=[], open_questions=[question])
     result = memory(runs=[run(1)], reflections=[validated], iterations=[{"search_trace": [planned]}])
     assert result["open_questions"] == ["What inputs remain untested?"]
     assert result["attempt_ledger"][0]["resolved_question"] == question
     invalid = {**record, "resolved_question": "Invented question"}
-    rejected = planner(LLM(json.dumps(invalid), json.dumps(invalid))).reflect(
+    rejected = reviewer(LLM(json.dumps(invalid), json.dumps(invalid))).reflect(
         user_goal="Inspect input handling", attempt_id="task-01", attempt=run(1),
         findings=[], prior_reflections=[], open_questions=[question])
     assert rejected.source == "runtime" and rejected.resolved_question == ""
 
 
 def test_omitted_memory_assessments_are_retained_until_explicitly_updated():
-    initial = {"search_trace": [{"phase": "propose", **proposal(open_questions=["Unresolved input question"],
+    initial = {"search_trace": [{"phase": "plan_objective", **proposal(open_questions=["Unresolved input question"],
                                                                remaining_objectives=["Verify the observed parameter"])}]}
-    omitted = {"search_trace": [{"phase": "propose", **proposal(open_questions=None, remaining_objectives=None)}]}
+    omitted = {"search_trace": [{"phase": "plan_objective", **proposal(open_questions=None, remaining_objectives=None)}]}
     result = memory(iterations=[initial, omitted])
     assert result["open_questions"] == ["Unresolved input question"]
     assert result["goal_and_constraints"]["remaining_objectives"] == ["Verify the observed parameter"]
-    cleared = {"search_trace": [{"phase": "propose", **proposal(open_questions=[], remaining_objectives=[])}]}
+    cleared = {"search_trace": [{"phase": "plan_objective", **proposal(open_questions=[], remaining_objectives=[])}]}
     result = memory(iterations=[initial, omitted, cleared])
     assert result["open_questions"] == result["goal_and_constraints"]["remaining_objectives"] == []
+
+
+def test_head_memory_notes_survive_multiple_actions_in_the_same_objective():
+    iterations = [{"task_id": "objective-01", "memory_notes": ["Keep this exact strategic constraint"]}]
+    iterations += [{"task_id": f"task-{index:02d}", "tool_request": {}} for index in range(1, 5)]
+    result = memory(iterations=iterations)
+    assert result["planning_notes"] == [{"task_id": "objective-01", "notes": ["Keep this exact strategic constraint"]}]

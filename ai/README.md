@@ -1,14 +1,14 @@
 # PwnAI Phase 1 (Local Single-Session Orchestrator)
 
 This is the Phase 1 implementation for the AI layer:
-- Two Ollama-backed models (local or cloud mode)
-  - Head LLM: `qwen3:8b`
-  - Implementor LLM: `qwen2.5-coder:7b`
+- Three independently configured Ollama-backed roles (local or cloud mode): head, implementor, and feedback
+- Roles may use the same underlying model with separate prompts and clients
 - LangGraph orchestration loop
-- Head performs bounded candidate search and per-attempt/session reflection; it has no retrieval or execution tools
-- Stateless implementor observes each handoff, retrieves actual tool documentation, and builds one JSON request
+- Head delegates one bounded objective using current-session evidence and feedback; it has no retrieval or execution tools
+- Feedback agent reviews actual attempts and produces validated lessons; it has no planning, retrieval, or execution tools
+- Implementor keeps a ReAct conversation within each objective, retrieving docs and inspecting actual results between tool calls
 - Per-action permission prompt via `ActionFilter`
-- No API and no background workers in this phase
+- Each tool action runs in a worker with a runtime deadline; the API streams the session output
 
 ## Run
 
@@ -70,9 +70,18 @@ models:
     provider: "cloud"       # or "local"
   implementor:
     provider: "local"       # or "cloud"
+  feedback:
+    provider: "local"       # independently configurable
+    model: "your-review-model"
+    temperature: 0.1
   embedding:
     provider: "local"       # or "cloud"
 ```
+
+`models.feedback` can override model, provider, temperature, reasoning, and context size.
+If the section is omitted, feedback inherits the head settings but still uses a separate
+client and prompt. Partial feedback settings override only the specified head settings.
+The checked-in config starts feedback on the same underlying model as the head.
 
 Cloud API key (recommended via env var):
 
@@ -105,116 +114,160 @@ ollama:
 4. Reports are written to `artifacts/phase1/`.
 5. Head-planner reasoning summaries are printed in terminal and written under `Head Planner Trace` in the report.
 
-## Observation and action flow
+## Objective planning and execution
 
-The head first writes normal public assessments, then emits a final validated JSON record
-only when ready. `Thought:`, `Observation:`, and `Correction:` are optional: the model may
-use any, repeat them, omit individual labels, or use plain prose. It can also omit prose
-entirely when ready. These are concise evidence/decision summaries, not private internal
-chain-of-thought. No fixed assessment sections or minimum observation count are required.
+The head writes assessment prose freely, without prescribed labels or sections. There is
+no ToT candidate tree, scoring, or separate evaluation call. A response requiring another
+assessment round ends with `Status: need_more_thinking` and no JSON. The next call receives
+the preceding assessments and the same evidence. When ready, the head emits `Status: ready`
+followed by exactly one validated final JSON object; a JSON code fence is allowed.
+`runtime.head_thinking_rounds` defaults to 3 rounds per phase, plus one repair for malformed
+output. Prose is optional when the decision is straightforward.
 
-A response that needs another assessment round ends with:
+The planning JSON selects one objective and includes:
+
+- `decision`: continue or stop, with `stop_reason` for a stop.
+- `objective`, `observation_summary`, and `evidence_refs`.
+- Important `verified_facts`, separate `hypotheses`, and explicit `success_criteria`.
+- `constraints` and `return_conditions` for the implementor.
+- Head-only `memory_note`, `remaining_objectives`, and `open_questions`.
+
+The runtime adds the original target, selected current application/authentication context,
+and goal to the implementor handoff. It does not transfer the head's full assessment
+transcript, raw session history, or head-only memory notes. Exact technical values and
+references should be preserved in the summary. Model assessments are not automatically
+promoted to verified runtime facts.
 
 ```text
-Observation: The available evidence leaves a prerequisite unresolved.
-Status: need_more_thinking
+Head assessment -> ready + validated objective JSON
+  -> Implementor retrieves actual documentation
+  -> choose one request -> validate -> approve -> execute -> analyze
+  -> feed the actual result back to the implementor
+  -> continue locally or return an objective report
+  -> Feedback agent review -> validate/update session memory -> next Head objective
 ```
 
-The runtime continues the same phase with its previous assessments and original evidence.
-There is no JSON or implementor handoff for that response. When ready, the head ends with
-`Status: ready`, immediately followed by exactly one final JSON object for the current
-phase (optionally in a JSON fence). The prompt describes the required fields in readable
-text; the runtime retains the full schema validation. Status alone cannot bypass schema, evidence-reference,
-or candidate-review validation. Each head phase follows this protocol:
+The implementor uses `Observation:`, `Action:`, and `Action Input:` for its ReAct protocol.
+Actions are `retrieve_tool_info`, `retrieve_args`, `retrieve_all_tool_docs`, `execute_tool`,
+and `return_to_head`. Only the first action in a response is processed. Fabricated
+continuations after retrieval/execution requests are discarded. A retrieval returning documents identified as belonging to a tool
+must succeed before that tool can execute; documentation remains available within the
+objective and can be supplemented. Retrieval logs show the action, retrieval query/tool,
+and completion, without printing document bodies. Raw retrieval records remain in the
+session archive.
 
-1. **Propose:** initially generate two or three distinct candidate objectives. On later
-   calls, use branching for uncertainty, failure, or stalled progress; one direct objective
-   is allowed after verified progress. Each candidate carries its evidence references,
-   prerequisites, expected information, a self-contained summary, and up to two conditional
-   followups. Lookahead is limited to the immediate objective plus one hypothetical level.
-2. **Evaluate:** a separate model call rates every candidate's evidence strength,
-   information gain, goal alignment, and cost. The runtime prunes/defers unsuitable options,
-   blocks unmet prerequisites, and selects one viable candidate by ordinal score:
-   `2 * evidence_strength + information_gain + goal_alignment - cost`. Scores are not
-   success probabilities. The working frontier holds at most six candidates; retained
-   alternatives are reassessed against current evidence during branching. Reconsidering
-   a plan never rolls back changes to the target environment.
-3. **Execute:** only the selected `observation_summary` and `next_step`, original target,
-   and current application context go to the existing stateless implementor. It receives
-   no candidate tree or full head history. Authentication, discovered endpoints,
-   navigation, and a page sample remain available as before.
-4. **Reflect:** after every approved/denied execution, the head records evidence references,
-   outcome category, lesson, next adjustment, retry condition, and whether verified progress
-   occurred. Compilation failures are also recorded before final reporting. Execution
-   errors, missing documentation, failed authentication, timeouts, completed negative tests,
-   and positive findings are distinguished. If reflection fails, a runtime record preserves
-   uncertainty instead of inventing a lesson or successful result.
-5. **Consolidate:** every exit, including attempt-limit exits, produces a session assessment.
-   The original attempt lessons are attached unchanged to the Markdown report for review.
-   No standalone feedback files are written or loaded for later sessions. Every new
-   session starts with empty history, an empty attempt ledger, and no previous feedback,
-   even when the same target, goal, and output directory are reused. Existing feedback
-   artifacts from older versions are ignored and left untouched.
+Every execution result, exact executed request, and analyzer findings return to the
+implementor before its next decision. One action may suffice; multiple actions are allowed,
+but never required. The implementor returns a report with `status` (completed, blocked,
+strategy_change, inconclusive), `summary`, `evidence_refs`, and `remaining_uncertainty`.
+A completed report requires a reference to actual successful execution, and remains an
+assessment for the head to check against evidence. It does not complete the original goal.
+Each new objective starts a fresh implementor conversation.
 
-### Current-session working memory
+### Runtime controls
 
-Before each planning call the head receives `working_memory` with:
+Defaults in `ai/config/models.local.yaml`:
 
-- `goal_and_constraints`: the original goal/target, remaining objectives, operator constraints,
-  and runtime limits. Remaining objectives and open questions are planning assessments.
-- `verified_facts`: exact supplied target and application context, URLs with original encoded
-  queries plus parsed parameter names/values, authentication state, and analyzer findings
-  with provenance/confidence. A finding or operator input is not automatically proof of
-  a vulnerability. Attempt arguments are kept in the ledger, not promoted to facts.
-- `attempt_ledger`: every current-session attempt's objective, exact request/arguments,
-  execution status, return code/error, reflected outcome, progress, and explicitly resolved
-  question (if any). Missing reflection is labeled rather than treated as a negative result.
-- `feedback`: accumulated current-session lessons, corrections, and retry conditions.
-- `open_questions` and `candidate_objectives`: unresolved questions and retained alternatives.
-- `latest_result`: the newest actual execution output in full.
-- `relevant_older_evidence`: at most three older attempts, selected by explicit candidate
-  citations, relevance to the goal/candidates/recent feedback, then recency. Each nonempty
-  output field contributes a verbatim window of at most 1,200 characters, with field name,
-  offsets, total length, and a truncation flag. New proposal citations trigger fresh evidence
-  selection for evaluation. Exact requests, technical values, and artifact paths are retained.
+```yaml
+runtime:
+  max_tasks: 12                    # total reviewed execution attempts across the session
+  max_replans: 8                   # further head objectives after the initial one
+  max_actions_per_objective: 3
+  max_consecutive_failures: 2
+  objective_timeout_seconds: 600
+  head_thinking_rounds: 3
+  feedback_validation_retries: 1  # one output repair after the feedback review
+rag:
+  max_react_iterations_impl: 3     # RAG calls per implementor decision
+  max_validation_retries_impl: 2  # separate repair allowance
+```
 
-The runtime builds memory directly from authoritative session records; it does not repeatedly
-summarize summaries. After execution and reflection, both the ledger and feedback are updated
-**before** the next objective is chosen. Full raw executions, observations, candidate evaluations,
-and implementor RAG traces remain available in `runs` and `head_iterations` during the session,
-but are not replayed in every model prompt. The last three head memory notes and last eight
-runtime notes are included as context; they are explicitly separate from observed facts.
-`candidate_frontier`, `task_candidates`, `attempt_reflections`, `working_memory`, and
-`session_reflection` retain the planning/feedback state. There are no model-weight updates.
-`runtime.head_thinking_rounds` sets the assessment-round limit per head phase (default 3,
-minimum 1), plus one repair for invalid output. `need_more_thinking` is a real continuation,
-not a malformed-output repair. Exhaustion before a valid `ready` prevents executable
-handoffs; failed reflection retains conservative runtime feedback. Proposed candidates
-still receive a separate evaluation phase before the implementor runs. The same protocol
-applies to attempt reflection and session consolidation. Public assessment/status records
-are kept under `thinking_steps` in each search-trace phase, `reflection_thinking_steps`
-in the attempt's head iteration, and `session_thinking_steps` for consolidation. They stay
-in the session archive rather than being replayed in every scoped-memory prompt.
+The runtime returns control for exhausted action/time budgets, consecutive failures, two
+successive unchanged results, authentication problems, denied actions, and duplicate
+requests. The implementor can return earlier for completed criteria, missing prerequisites,
+strategic changes, or another head return condition. Every actual request still passes
+validation and the existing action filter. Head objectives and repeated invalid/duplicate
+requests consume the finite replan budget; they cannot restart an unlimited recovery loop.
+Budget exhaustion is not reported as goal completion.
 
-The existing `max_replans` bounds planning/recovery attempts independently. Each planning
-decision has proposal + review phases, each executed attempt adds a reflection phase, and
-session end adds consolidation; each phase can use its bounded assessment rounds.
+All retrieval actions provide document text together with the tool identities from the
+actual returned store records. General searches satisfy the documentation prerequisite
+for every tool present in their results. Queries and text inside documents cannot grant
+eligibility to a tool absent from the returned metadata. The implementor receives the
+runtime-confirmed documented tool identities with each retrieval. Retrieval, validation
+repairs, and the final execution/return decision have separate allowances: at most
+`max_react_iterations_impl + max_validation_retries_impl + 1` model calls per decision.
+Even the last allowed retrieval is followed by an opportunity to submit a request or
+return to the head, within the objective deadline. Runtime rejections are printed explicitly;
+retrieved document bodies remain hidden from the terminal.
 
-If a proposed request repeats a previous tool/action/target/argument combination, the
-runtime rejects it without approval or execution and writes `duplicate_rejected` feedback
-into the same-session ledger. The head then replans with that feedback and can correct
-the request or choose a retained alternative. Changing an objective title alone does not
-make a request new. Rejected proposals count against `max_replans`; repeated duplicates
-eventually stop with an explicit budget-exhaustion reason. Proposal/attempt IDs remain
-unique across rejected and executed requests, so execution IDs may have gaps. Raw output
-and `latest_result` still represent actual executions, not rejected proposals.
+The objective deadline is checked between model/retrieval decisions and before execution.
+Running tool adapters execute in a separate process with the remaining deadline, allowing
+the runtime to stop the worker and its subprocess group on POSIX. An in-flight model or
+retrieval call still uses its client's timeout; an expired objective cannot start a further
+tool action. The implementor gets a final opportunity to inspect the last result and return
+when the action budget ends, provided time remains.
 
-Each implementor call runs its own bounded observation/action loop. Retrieval actions execute
-in the runtime; results return in the next model call before a final JSON request can be accepted.
-Each accepted assessment/action and real RAG result is recorded in session state. During
-retrieval, session output shows only the action, retrieval progress, and completion message;
-retrieved document text is not printed. The implementor can request additional documentation before submitting one executable
-tool request. Actual execution remains in the runtime, and its complete results return to the head.
-Model-generated retrieval observations and answers following a retrieval in the same response
-are discarded. `rag.max_react_iterations_impl` bounds calls and must be at least two.
-The existing approval, execution, cookie refresh, analysis, and reporting stages remain in place.
+CLI `--max-actions-per-objective` overrides the config. The old
+`--max-new-tasks-per-replan` flag remains an alias. Batch cases accept the new
+`max_actions_per_objective` key, and the API accepts `maxActionsPerObjective` with
+`maxNewTasksPerReplan` retained as an alias. `--max-tasks` now enforces the session-wide
+attempt limit as documented.
+
+### Current-session memory and feedback
+
+The head's prompt and planner contain no reflection or session-summary phases. The
+feedback role has a separate prompt at `ai/agents/feedback/system_prompt.md`, a stateless
+review client, and no tool loop. Its input includes the original goal, delegated objective,
+exact attempt/results, implementor report, findings, relevant previous lessons, and open
+questions. The implementor report is an assessment; execution records remain authoritative.
+Its `next_adjustment` is advice, and the head retains the next-objective decision.
+
+Feedback returns one JSON record, without the head's readiness/prose protocol. Invalid
+records can be repaired up to `runtime.feedback_validation_retries` times (default 1);
+transport failures use conservative runtime fallback. Outcome validation and duplicate
+rejection lessons are runtime-owned, so a failed/incomplete attempt cannot become a
+completed negative test or verified progress through model output. Feedback is validated
+and stored **before** the next head planning call; no intermediate head review is added.
+
+The same feedback role produces the final session assessment, with original attempt
+lessons attached unchanged by the runtime. Logs use `[Feedback]` / `[Feedback LLM]`;
+objective review traces live in `head_iterations[].feedback_steps`, and the final trace
+lives in `session_feedback_steps`. These are session archives, not feedback-agent chat
+history. Each review starts a fresh conversation, even when the same model client is reused.
+
+After **every actual action**, the runtime updates the factual ledger before another
+implementor decision. At the objective boundary, the dedicated feedback agent reviews all
+actual/rejected attempts and the implementor report. It writes evidence-based lessons,
+corrections, next adjustments, and retry conditions before another objective is selected.
+Execution failures, missing documentation, authentication failures, timeouts, denied actions,
+completed negative tests, and positive findings remain distinct. A failed command does not
+disprove a hypothesis. Invalid/unavailable feedback falls back to conservative runtime
+records, preserving uncertainty and the actual execution status.
+
+Before each planning call, `working_memory` contains:
+
+- `goal_and_constraints`: original goal/target, remaining objectives, operator constraints,
+  and runtime limits.
+- `verified_facts`: exact supplied/observed values, encoded URL queries and parsed
+  parameters, authentication state, and analyzer findings with provenance/confidence.
+- `attempt_ledger`: exact requests, execution statuses, errors, outcomes, and resolved
+  questions. Pending feedback is labeled `awaiting_reflection`.
+- `feedback` and `objective_feedback`: current-session attempt lessons and objective reviews.
+- `open_questions`, `active_objective`, and the newest actual `latest_result` in full.
+- `relevant_older_evidence`: at most three relevant older attempts, selected by objective
+  citations, overlap with the goal/current objective/recent feedback, then recency. Each
+  nonempty output field supplies a verbatim window of at most 1,200 characters with offsets
+  and truncation metadata. Exact requests and artifact references remain intact.
+
+Full raw executions and public assessment/action traces stay in `runs`, `attempt_records`,
+and `head_iterations` during the session. Memory is rebuilt from these authoritative
+records instead of repeatedly summarizing summaries. A duplicate is recorded as rejected
+without approval or execution; `latest_result` remains the last real execution record.
+The head uses the validated feedback to choose another objective or delegate corrected inputs. Unique task IDs can have
+gaps for rejected/invalid requests.
+
+The Markdown report retains actual outputs, objective feedback, and original attempt
+lessons. A final session assessment does not rewrite those lessons. Every new session starts
+with fresh history; no feedback is read from or written to standalone files for reuse in
+later sessions. Existing feedback files from older versions are ignored and left untouched.
