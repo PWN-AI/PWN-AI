@@ -19,38 +19,52 @@ ollama:
 models:
   head:
     # Choose per-role provider: local | cloud
-    provider: "cloud"
-    model: "gpt-oss:120b"
+    provider: "local"
+    model: "qwen3.5:4b"
     temperature: 0.2 #original 0.2
-    # GPT-OSS uses low/medium/high; other models may use true/false.
-    reasoning: "low"
-    num_ctx: 32768 #32768
+    # change the reasoning to true/false for wanted models (especially qwen and deepseek)
+    reasoning: false 
+    num_ctx: 16384 #32768
   implementor:
-    provider: "cloud"
-    model: "gpt-oss:120b"
+    provider: "local"
+    model: "qwen3.5:4b"
     temperature: 0.1
-    reasoning: "low"
-    num_ctx: 32768 #32768
+    reasoning: false
+    num_ctx: 16384 #32768
+  feedback:
+    # Independent role; start with the same underlying model as the head.
+    provider: "local"
+    model: "qwen3.5:4b"
+    temperature: 0.1
+    reasoning: false
+    num_ctx: 16384 #32768
+  embedding:
+    provider: "local"
+    model: "nomic-embed-text:latest"
+
+# make the embedding local to save API cost when presenting
+# model: nomic-embed-text:latest
+# provider: local
+
 runtime:
-  max_tasks: 1
+  max_tasks: 12
   max_replans: 8
-  max_new_tasks_per_replan: 1
+  # The head delegates one objective; the implementor may take several real actions.
+  max_actions_per_objective: 3
+  max_consecutive_failures: 2
+  objective_timeout_seconds: 600
+  head_thinking_rounds: 3
+  feedback_validation_retries: 1
   ask_permission_per_action: true
   auto_approve: false
 
 rag:
   enabled: true
-  database_url_env: "RAG_DATABASE_URL"
-  snapshot_path: "ai/rag/database/knowledge.json"
-  embedding:
-    provider: "cohere"
-    model: "embed-v4.0"
-    dimensions: 1024
-    api_key_env: "COHERE_API_KEY"
-  # Maximum ReAct iterations for head planner (plan/replan)
-  max_react_iterations_head: 4
-  # Maximum ReAct iterations for implementor
+  persist_dir: "ai/rag/index"
+  # Head objective planning/reflection has no retrieval loop.
+  # Maximum RAG calls per decision; a final execution/return call is reserved separately.
   max_react_iterations_impl: 3
+  max_validation_retries_impl: 2
 
 # models available for testing:
 #  - "Dolphin3.0-Llama3.1-8B-GGUF:Q4_0"

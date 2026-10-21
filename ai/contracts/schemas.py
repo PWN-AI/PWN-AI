@@ -65,6 +65,15 @@ class ToolRequest(BaseModel):
     reasoning: str = ""
 
 
+    @model_validator(mode="after")
+    def _validate_target_mode(self) -> "ToolRequest":
+        if self.target_mode == "url" and not self.target.url:
+            raise ValueError("target_mode=url requires target.url")
+        if self.target_mode == "request_file" and not self.target.request_file:
+            raise ValueError("target_mode=request_file requires target.request_file")
+        return self
+
+
 class ExecutionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

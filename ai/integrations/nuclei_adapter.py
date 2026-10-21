@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import Dict, List
 from urllib.parse import urlparse
@@ -45,7 +44,7 @@ class NucleiXssAdapter(ToolAdapter):
                 out_file = self.project_root / out_file
 
             cmd = [
-                sys.executable,
+                "python",
                 str(self.script_path),
                 "--target",
                 request.target.url if request.target_mode == "url" else (request.target.request_file or ""),
@@ -59,10 +58,6 @@ class NucleiXssAdapter(ToolAdapter):
 
             for host in self._derive_allow_hosts(request):
                 cmd.extend(["--allow-host", host])
-
-            templates = request.args.get("nuclei_templates")
-            if templates:
-                cmd.extend(["--nuclei-templates", str(templates)])
 
             cookie = request.args.get("cookie")
             if cookie:

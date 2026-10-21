@@ -307,12 +307,8 @@ const bootstrap = async () => {
         : "Check your local Ollama instance or cloud credentials to enable live output."
     );
   } catch (error) {
-    if (error.status === 401) {
-      clearStoredAuth();
-      window.location.href = "/auth";
-    } else {
-      renderStatus("Connection unavailable.", error.message || "Could not load AI context.");
-    }
+    clearStoredAuth();
+    window.location.href = "/auth";
     return;
   }
 

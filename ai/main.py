@@ -42,7 +42,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--continue-on-error", action="store_true", help="Continue batch execution after a case fails")
     parser.add_argument("--max-tasks", type=int, help="Maximum total task count per session")
     parser.add_argument("--max-replans", type=int, help="Maximum adaptive re-plan iterations per session")
-    parser.add_argument("--max-new-tasks-per-replan", type=int, help="Maximum new tasks per re-plan")
+    parser.add_argument("--max-actions-per-objective", "--max-new-tasks-per-replan",
+                        dest="max_actions_per_objective", type=int,
+                        help="Maximum sequential tool actions per delegated objective (old flag is an alias)")
     parser.add_argument(
         "--summary-out",
         default="artifacts/phase1/batch_summary.json",
@@ -126,23 +128,20 @@ def _build_run_args(base_args: argparse.Namespace, case: Dict[str, Any]) -> argp
         print_final_state=bool(case.get("print_final_state", base_args.print_final_state)),
         max_tasks=case.get("max_tasks", base_args.max_tasks),
         max_replans=case.get("max_replans", base_args.max_replans),
-        max_new_tasks_per_replan=case.get("max_new_tasks_per_replan", base_args.max_new_tasks_per_replan),
+        max_actions_per_objective=case.get("max_actions_per_objective", case.get("max_new_tasks_per_replan", base_args.max_actions_per_objective)),
     )
 
 
 def _serialize_state(state: Dict[str, Any]) -> Dict[str, Any]:
-    serializable: Dict[str, Any] = {}
-    for key, value in state.items():
+    def encode(value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            return encode(value.model_dump())
+        if isinstance(value, dict):
+            return {key: encode(item) for key, item in value.items()}
         if isinstance(value, list):
-            serializable[key] = [
-                item.model_dump() if hasattr(item, "model_dump") else str(item)
-                for item in value
-            ]
-        elif hasattr(value, "model_dump"):
-            serializable[key] = value.model_dump()
-        else:
-            serializable[key] = value
-    return serializable
+            return [encode(item) for item in value]
+        return value
+    return encode(state)
 
 
 def main() -> None:

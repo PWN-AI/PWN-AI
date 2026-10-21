@@ -122,13 +122,9 @@ export const verifyStoredAuth = async () => {
       token: auth.token,
       user: payload.user,
     };
-  } catch (error) {
-    if (error.status === 401) {
-      clearStoredAuth();
-      return null;
-    }
-    // A failed/cancelled network request does not invalidate the token.
-    return auth;
+  } catch {
+    clearStoredAuth();
+    return null;
   }
 };
 
@@ -144,9 +140,7 @@ export const readErrorMessage = async (response) => {
 export const apiFetch = async (path, init = {}) => {
   const response = await fetch(path, init);
   if (!response.ok) {
-    const error = new Error(await readErrorMessage(response));
-    error.status = response.status;
-    throw error;
+    throw new Error(await readErrorMessage(response));
   }
   return response.json();
 };

@@ -110,7 +110,7 @@ exports.chatController = {
             // Crawling
             crawlDepth, 
             // Runtime
-            config, outputDir, autoApprove, printFinalState, maxTasks, maxReplans, maxNewTasksPerReplan, stream, } = req.body;
+            config, outputDir, autoApprove, printFinalState, maxTasks, maxReplans, maxActionsPerObjective, maxNewTasksPerReplan, stream, } = req.body;
             // Validation
             if (!goal) {
                 res.status(400).json({ error: 'goal is required' });
@@ -154,6 +154,7 @@ exports.chatController = {
                 printFinalState,
                 maxTasks,
                 maxReplans,
+                maxActionsPerObjective,
                 maxNewTasksPerReplan,
             };
             if (isStreamRequest(stream)) {

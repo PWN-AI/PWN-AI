@@ -139,13 +139,19 @@ def resolve_ollama_connection(cfg: Dict[str, Any], provider: Optional[str] = Non
     raise ValueError("Invalid Ollama provider. Expected 'local' or 'cloud'.")
 
 
-def resolve_model_connection(cfg: Dict[str, Any], role: str) -> Dict[str, Any]:
-    """Resolve provider connection for a model role (head/implementor/embedding)."""
-    models_cfg = cfg.get("models", {}) or {}
-    role_cfg = models_cfg.get(role, {}) or {}
+def resolve_model_config(cfg: Dict[str, Any], role: str) -> Dict[str, Any]:
+    """Feedback inherits the head model settings when omitted, with independent overrides."""
+    models = cfg.get("models", {}) or {}
+    inherited = dict(models.get("head", {}) or {}) if role == "feedback" else {}
+    role_cfg = models.get(role, {}) or {}
     if not isinstance(role_cfg, dict):
-        role_cfg = {}
+        raise ValueError(f"models.{role} must be a mapping.")
+    return {**inherited, **role_cfg}
 
+
+def resolve_model_connection(cfg: Dict[str, Any], role: str) -> Dict[str, Any]:
+    """Resolve the provider for a model role, including feedback's inherited settings."""
+    role_cfg = resolve_model_config(cfg, role)
     provider = str(role_cfg.get("provider", "")).strip().lower()
     conn = resolve_ollama_connection(cfg, provider=provider or None)
     conn["role"] = role
@@ -198,40 +204,27 @@ class StreamingChatOllama:
         return getattr(self._llm, name)
 
 
-def build_ollama_clients(config_path: Path) -> Tuple[ChatOllama, ChatOllama, Dict[str, Any]]:
+def _build_model_client(cfg: Dict[str, Any], role: str) -> ChatOllama:
+    model_cfg = resolve_model_config(cfg, role)
+    connection = resolve_model_connection(cfg, role)
+    kwargs: Dict[str, Any] = {
+        "base_url": connection["base_url"], "model": model_cfg["model"],
+        "temperature": float(model_cfg.get("temperature", 0.2 if role == "head" else 0.1)),
+        "num_ctx": int(model_cfg.get("num_ctx", 32768)),
+    }
+    if "reasoning" in model_cfg:
+        kwargs["reasoning"] = bool(model_cfg["reasoning"])
+    if connection.get("headers"):
+        kwargs["client_kwargs"] = {"headers": dict(connection["headers"])}
+    return ChatOllama(**kwargs)
+
+
+def build_ollama_clients(config_path: Path) -> Tuple[Any, ChatOllama, Dict[str, Any]]:
+    # Preserve the three-value API used by the standalone chat endpoint.
     cfg = load_model_config(config_path)
+    head = StreamingChatOllama(_build_model_client(cfg, "head"), label="Head LLM")
+    return head, _build_model_client(cfg, "implementor"), cfg
 
-    head_cfg = cfg["models"]["head"]
-    impl_cfg = cfg["models"]["implementor"]
-    head_conn = resolve_model_connection(cfg, "head")
-    impl_conn = resolve_model_connection(cfg, "implementor")
 
-    head_kwargs: Dict[str, Any] = {
-        "base_url": head_conn["base_url"],
-        "model": head_cfg["model"],
-        "temperature": float(head_cfg.get("temperature", 0.2)),
-        "num_ctx": int(head_cfg.get("num_ctx", 32768)),
-    }
-    if "reasoning" in head_cfg:
-        head_kwargs["reasoning"] = head_cfg["reasoning"]
-    if head_conn.get("headers"):
-        head_kwargs["client_kwargs"] = {"headers": dict(head_conn["headers"])}
-
-    impl_kwargs: Dict[str, Any] = {
-        "base_url": impl_conn["base_url"],
-        "model": impl_cfg["model"],
-        "temperature": float(impl_cfg.get("temperature", 0.1)),
-        "num_ctx": int(impl_cfg.get("num_ctx", 32768)),
-    }
-    if "reasoning" in impl_cfg:
-        impl_kwargs["reasoning"] = impl_cfg["reasoning"]
-    if impl_conn.get("headers"):
-        impl_kwargs["client_kwargs"] = {"headers": dict(impl_conn["headers"])}
-
-    head = ChatOllama(**head_kwargs)
-    implementor = ChatOllama(**impl_kwargs)
-
-    # Wrap head LLM with streaming for live thinking display
-    streaming_head = StreamingChatOllama(head, label="Head LLM")
-
-    return streaming_head, implementor, cfg
+def build_feedback_client(cfg: Dict[str, Any]) -> StreamingChatOllama:
+    return StreamingChatOllama(_build_model_client(cfg, "feedback"), label="Feedback LLM")

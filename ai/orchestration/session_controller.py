@@ -6,16 +6,17 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict
 
-from ai.agents.head_qwen3_8b.planner import HeadPlanner
-from ai.agents.implementor_qwen25coder_7b.compiler import ImplementorCompiler
+from ai.agents.head.planner import HeadPlanner
+from ai.agents.feedback.agent import FeedbackAgent
+from ai.agents.implementor.compiler import ImplementorCompiler
 from ai.analysis.result_analyzer import ResultAnalyzer
 from ai.config.env_loader import load_project_env
 from ai.execution.auth import attempt_pre_auth
 from ai.execution.run_manager import RunManager
-from ai.llm.ollama_client import build_ollama_clients, resolve_model_connection
+from ai.llm.ollama_client import build_feedback_client, build_ollama_clients, resolve_model_config, resolve_model_connection
 from ai.orchestration.langgraph_flow import build_phase1_graph
 from ai.orchestration.state import SessionState
-from ai.rag.ingest import store_from_config
+from ai.rag.ingest import ensure_index_ready
 from ai.rag.retriever import ToolRetriever
 from ai.reporting.report_generator import ReportGenerator
 from ai.safety.action_filter import ActionFilter
@@ -53,7 +54,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--print-final-state", action="store_true", help="Print final state JSON summary")
     parser.add_argument("--max-tasks", type=int, help="Maximum total task count in this session")
     parser.add_argument("--max-replans", type=int, help="Maximum adaptive re-plan iterations")
-    parser.add_argument("--max-new-tasks-per-replan", type=int, help="Maximum new tasks added per re-plan")
+    parser.add_argument("--max-actions-per-objective", "--max-new-tasks-per-replan",
+                        dest="max_actions_per_objective", type=int,
+                        help="Maximum sequential tool actions per delegated objective (old flag is an alias)")
     # NEW: Add option for crawl depth
     parser.add_argument("--crawl-depth", type=int, default=2, help="Depth of endpoint crawling (0-3, default 2)")
     return parser
@@ -75,6 +78,7 @@ def run_session(args: argparse.Namespace) -> SessionState:
     config_path = (project_root / args.config).resolve()
 
     head_llm, impl_llm, cfg = build_ollama_clients(config_path)
+    feedback_llm = build_feedback_client(cfg)
     head_conn = resolve_model_connection(cfg, "head")
     impl_conn = resolve_model_connection(cfg, "implementor")
     print(
@@ -86,30 +90,58 @@ def run_session(args: argparse.Namespace) -> SessionState:
         f"base_url: {impl_conn['base_url']} | model: {cfg['models']['implementor']['model']}"
     )
 
+    feedback_conn = resolve_model_connection(cfg, "feedback")
+    print(f"[LLM] feedback provider: {feedback_conn['provider']} | "
+          f"base_url: {feedback_conn['base_url']} | model: {resolve_model_config(cfg, 'feedback')['model']}")
+
     # ── Initialize RAG retriever ──
     rag_cfg = cfg.get("rag", {})
     rag_enabled = bool(rag_cfg.get("enabled", True))
     retriever = None
 
     if rag_enabled:
+        embed_conn = resolve_model_connection(cfg, "embedding")
+        ollama_base_url = embed_conn["base_url"]
+        ollama_headers = embed_conn.get("headers", {})
+        embedding_model = cfg.get("models", {}).get("embedding", {}).get("model", "nomic-embed-text")
+        persist_dir = project_root / rag_cfg.get("persist_dir", "ai/rag/index")
+        print(
+            f"[RAG] embedding provider: {embed_conn['provider']} | "
+            f"base_url: {ollama_base_url} | model: {embedding_model}"
+        )
+
         try:
-            store = store_from_config(cfg, project_root)
+            store = ensure_index_ready(
+                persist_dir=persist_dir,
+                ollama_base_url=ollama_base_url,
+                embedding_model=embedding_model,
+                ollama_headers=ollama_headers,
+            )
             retriever = ToolRetriever(store)
-            print(f"[RAG] Tool knowledge base initialized ({store.document_count} vectors).")
+            print(f"[RAG] Tool knowledge base initialized ({store._index.ntotal} vectors).")
         except Exception as exc:
             print(f"[RAG] WARNING: Failed to initialize RAG: {exc}")
-            print("[RAG] Continuing without RAG retrieval (LLMs will use pretrained knowledge only).")
-            retriever = None
+            raise RuntimeError("Implementor cannot run without RAG documentation.") from exc
+
+    if retriever is None:
+        raise RuntimeError("RAG must be enabled for the observation/action implementor.")
 
     planner = HeadPlanner(
         llm=head_llm,
-        prompt_path=project_root / "ai" / "agents" / "head_qwen3_8b" / "system_prompt.md",
-        retriever=retriever,
+        prompt_path=project_root / "ai" / "agents" / "head" / "system_prompt.md",
+        max_thinking_rounds=int(cfg.get("runtime", {}).get("head_thinking_rounds", 3)),
+    )
+    feedback = FeedbackAgent(
+        llm=feedback_llm,
+        prompt_path=project_root / "ai" / "agents" / "feedback" / "system_prompt.md",
+        max_validation_retries=int(cfg.get("runtime", {}).get("feedback_validation_retries", 1)),
     )
     compiler = ImplementorCompiler(
         llm=impl_llm,
-        prompt_path=project_root / "ai" / "agents" / "implementor_qwen25coder_7b" / "system_prompt.md",
+        prompt_path=project_root / "ai" / "agents" / "implementor" / "system_prompt.md",
         retriever=retriever,
+        max_iterations=int(rag_cfg.get("max_react_iterations_impl", 3)),
+        max_validation_retries=int(rag_cfg.get("max_validation_retries_impl", 2)),
     )
     action_filter = ActionFilter(
         ask_permission=bool(cfg.get("runtime", {}).get("ask_permission_per_action", True)),
@@ -121,6 +153,7 @@ def run_session(args: argparse.Namespace) -> SessionState:
 
     app = build_phase1_graph(
         planner=planner,
+        feedback=feedback,
         implementor=compiler,
         action_filter=action_filter,
         run_manager=run_manager,
@@ -130,13 +163,9 @@ def run_session(args: argparse.Namespace) -> SessionState:
 
     target_payload = _build_target(args)
     runtime_cfg = cfg.get("runtime", {})
-    max_tasks = int(args.max_tasks if args.max_tasks is not None else runtime_cfg.get("max_tasks", 6))
+    max_tasks = int(args.max_tasks if args.max_tasks is not None else runtime_cfg.get("max_tasks", 12))
     max_replans = int(args.max_replans if args.max_replans is not None else runtime_cfg.get("max_replans", 8))
-    max_new_tasks_per_replan = int(
-        args.max_new_tasks_per_replan
-        if args.max_new_tasks_per_replan is not None
-        else runtime_cfg.get("max_new_tasks_per_replan", 3)
-    )
+
 
     operator_context: Dict[str, Any] = {
         "username": args.username,
@@ -215,10 +244,14 @@ def run_session(args: argparse.Namespace) -> SessionState:
         "output_dir": str((project_root / args.output_dir).resolve()),
         "max_tasks": max_tasks,
         "max_replans": max_replans,
-        "max_new_tasks_per_replan": max_new_tasks_per_replan,
+        "max_actions_per_objective": int(args.max_actions_per_objective if getattr(args, "max_actions_per_objective", None) is not None else runtime_cfg.get("max_actions_per_objective", 3)),
+        "max_consecutive_failures": int(runtime_cfg.get("max_consecutive_failures", 2)),
+        "objective_timeout_seconds": float(runtime_cfg.get("objective_timeout_seconds", 600)),
         "notes": notes,
     }
-    final_state = app.invoke(initial_state)
+    # Four graph nodes per actual action, plus planning/return/feedback for each objective.
+    limit = 10 + 4 * max_tasks + 5 * (max_replans + 1)
+    final_state = app.invoke(initial_state, config={"recursion_limit": limit})
     return final_state
 
 
@@ -239,7 +272,7 @@ def main() -> None:
         for key, value in final_state.items():
             if isinstance(value, list):
                 serializable[key] = [
-                    item.model_dump() if hasattr(item, "model_dump") else str(item)
+                    item.model_dump() if hasattr(item, "model_dump") else item
                     for item in value
                 ]
             elif hasattr(value, "model_dump"):

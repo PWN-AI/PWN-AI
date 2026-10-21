@@ -154,8 +154,9 @@ class AIService {
     if (params.maxReplans !== undefined) {
       args.push('--max-replans', params.maxReplans.toString());
     }
-    if (params.maxNewTasksPerReplan !== undefined) {
-      args.push('--max-new-tasks-per-replan', params.maxNewTasksPerReplan.toString());
+    const maxActions = params.maxActionsPerObjective ?? params.maxNewTasksPerReplan;
+    if (maxActions !== undefined) {
+      args.push('--max-actions-per-objective', maxActions.toString());
     }
 
     return args;
@@ -347,14 +348,6 @@ for chunk in head_llm.stream(lc_messages):
   }
 
   streamChat(messages: ChatMessage[], model?: string, callbacks?: StreamCallbacks): StreamOperation<ChatResponse> {
-    // Python uses the Head model from YAML, not the legacy environment default
-    // or the optional request label.
-    const headSection = this.readModelConfigFile().match(
-      /^\s{2}head:\s*\r?\n([\s\S]*?)(?=^\s{2}\S|^\S|$(?![\s\S]))/m
-    );
-    const configuredModel = headSection?.[1].match(
-      /^\s+model:\s*["']?([^"'\r\n]+)/m
-    )?.[1].trim() || config.ollamaModel;
     return this.createOperation({
       args: ['-u', '-c', this.buildChatPythonScript()],
       stdinInput: JSON.stringify(messages),
@@ -370,7 +363,7 @@ for chunk in head_llm.stream(lc_messages):
 
         return {
           id: uuidv4(),
-          model: configuredModel,
+          model: model || config.ollamaModel,
           message: {
             role: 'assistant',
             content: stdout,
@@ -467,14 +460,9 @@ print(json.dumps(result))
       `$1${provider}$3`
     );
 
-    // Only chat roles belong to the Ollama provider switch. RAG uses Cohere
-    // independently and must not be rewritten to local/cloud.
     nextContent = nextContent.replace(
-      /(^models:\s*\r?\n)([\s\S]*?)(?=^\S|$(?![\s\S]))/m,
-      (_match, heading, roles) => heading + roles.replace(
-        /^(\s+provider:\s*["']?)([^"'\r\n]+)(["']?.*)$/gm,
-        `$1${provider}$3`
-      )
+      /^(\s+provider:\s*["']?)([^"'\r\n]+)(["']?.*)$/gm,
+      `$1${provider}$3`
     );
 
     fs.writeFileSync(this.modelConfigPath, nextContent, 'utf8');
