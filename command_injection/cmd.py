@@ -4,10 +4,16 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-# Path to commix.py relative to this file's location
-COMMIX_BIN = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tools", "commix", "commix.py"
+# Path to commix.py relative to this file's location.
+# Can be overridden with COMMIX_BIN env var for portability.
+COMMIX_BIN = os.environ.get(
+    "COMMIX_BIN",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "tools",
+        "commix",
+        "commix.py",
+    ),
 )
 
 ALLOWED_FLAGS = {
@@ -23,6 +29,7 @@ ALLOWED_FLAGS = {
     "-t": "value",  # traffic file
     "--time-limit": "value",
     "--batch": "bool",
+    "--ignore-stdin": "bool",
     "--skip-heuristics": "bool",
     "--codec": "value",
     "--charset": "value",
@@ -201,6 +208,8 @@ def run_commix_tool(
         FileNotFoundError: If request_file doesn't exist
     """
     options = options or {}
+    if not os.path.exists(COMMIX_BIN):
+        raise FileNotFoundError(f"Commix entrypoint not found: {COMMIX_BIN}")
 
     # Require exactly one target mode
     if (url is None) == (request_file is None):

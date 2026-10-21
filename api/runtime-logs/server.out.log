@@ -1,0 +1,19 @@
+[AI Service] Using Python: python
+
+╔═══════════════════════════════════════════════════════════╗
+║                     PWN-AI API Server                     ║
+╠═══════════════════════════════════════════════════════════╣
+║  Status:  Running                                         ║
+║  Port:    3000                                           ║
+║  Env:     development                                    ║
+║  Ollama:  http://localhost:11434                         ║
+╠═══════════════════════════════════════════════════════════╣
+║  Endpoints:                                               ║
+║    GET  /              - API info                         ║
+║    GET  /api/health    - Health check                     ║
+║    POST /api/auth/register - Register user                ║
+║    POST /api/auth/login    - Login                        ║
+║    POST /api/chat/completions - Chat with AI (auth)       ║
+║    GET  /api/chat/models - List models (auth)             ║
+╚═══════════════════════════════════════════════════════════╝
+  

@@ -1,0 +1,21 @@
+[project]
+name = "pwnai-phase1"
+version = "0.1.0"
+description = "Phase 1 local single-session orchestrator for PwnAI"
+requires-python = ">=3.10"
+dependencies = [
+  "langchain>=0.3.0",
+  "langchain-ollama>=0.2.0",
+  "langgraph>=0.2.0",
+  "pydantic>=2.7.0",
+  "PyYAML>=6.0.0",
+  "python-dotenv>=1.0.0",
+  "psycopg[binary]>=3.2.13,<4",
+  "requests>=2.32.0",
+  "beautifulsoup4>=4.14.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["ai/tests"]
+

@@ -119,6 +119,18 @@ def which(bin_name: str, guesses: List[str]) -> str:
     return ""
 
 
+def default_nuclei_guesses() -> List[str]:
+    """Return common nuclei binary locations across platforms."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    return [
+        # Workspace-local bundled binary (Windows-friendly default in this repo)
+        os.path.join(project_root, "tools", "nuclei", "nuclei.exe" if os.name == "nt" else "nuclei"),
+        # Common user installs
+        "~/go/bin/nuclei",
+    ]
+
+
 def _shorten(s: str, n: int = 260) -> str:
     s = (s or "").strip()
     return s if len(s) <= n else s[: n - 1] + "…"
@@ -148,12 +160,30 @@ class Finding:
 def detect_templates_root(user_path: Optional[str]) -> str:
     """
     Prefer user provided path.
-    Otherwise, use ~/nuclei-templates if present; else fallback to empty.
+    Otherwise, use a populated project-local, tools-local or user directory.
     """
     if user_path:
         return os.path.expanduser(user_path)
-    default = os.path.expanduser("~/nuclei-templates")
-    return default if os.path.isdir(default) else ""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    candidates = [
+        os.path.join(project_root, "nuclei-templates"),
+        os.path.join(project_root, "tools", "nuclei-templates"),
+        os.path.expanduser("~/nuclei-templates"),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate) and has_templates(candidate):
+            return candidate
+    return ""
+
+
+def has_templates(templates_root: str) -> bool:
+    for root, _, files in os.walk(templates_root):
+        for name in files:
+            lower = name.lower()
+            if lower.endswith(".yaml") or lower.endswith(".yml"):
+                return True
+    return False
 
 
 def run_nuclei(
@@ -181,6 +211,8 @@ def run_nuclei(
         "-tags", tags,
         "-jsonl",
         "-o", out_jsonl,
+        # Keep scans reproducible and bounded; install/update templates explicitly.
+        "-duc",
     ]
 
     if cfg.silent:
@@ -199,7 +231,18 @@ def run_nuclei(
     for k, v in (headers or {}).items():
         cmd += ["-H", f"{k}: {v}"]
 
-    subprocess.run(cmd, check=False, timeout=cfg.timeout_seconds)
+    proc = subprocess.run(
+        cmd,
+        check=False,
+        timeout=cfg.timeout_seconds,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        stdout = (proc.stdout or "").strip()
+        detail = stderr or stdout or f"nuclei exited with code {proc.returncode}"
+        raise RuntimeError(f"Nuclei scan failed: {detail}")
 
     findings: List[Finding] = []
     if not os.path.exists(out_jsonl):
@@ -302,7 +345,7 @@ def main():
         k, v = h.split(":", 1)
         headers[k.strip()] = v.strip()
 
-    nuclei_path = which("nuclei", ["~/go/bin/nuclei"])
+    nuclei_path = which("nuclei", default_nuclei_guesses())
     if not args.disable_nuclei and not nuclei_path:
         eprint("ERROR: nuclei not found in PATH (install nuclei or set PATH).")
         sys.exit(2)
@@ -313,6 +356,12 @@ def main():
         sys.exit(2)
     if templates_root and not os.path.isdir(templates_root):
         eprint(f"ERROR: templates root not found: {templates_root}")
+        sys.exit(2)
+    if not args.disable_nuclei and templates_root and not has_templates(templates_root):
+        eprint(
+            "ERROR: templates root contains no .yaml/.yml templates. "
+            "Install nuclei-templates or pass --nuclei-templates to a valid directory."
+        )
         sys.exit(2)
 
     cfg = RunnerConfig(
@@ -339,15 +388,19 @@ def main():
     try:
         if not args.disable_nuclei:
             eprint(f"[*] Running nuclei: -t {templates_root} -tags {args.tags}")
-            raw_jsonl, nuc_findings = run_nuclei(
-                nuclei_path=nuclei_path,
-                targets=filtered,
-                templates_root=templates_root,
-                tags=args.tags,
-                headers=headers,
-                cfg=cfg,
-                workdir=workdir,
-            )
+            try:
+                raw_jsonl, nuc_findings = run_nuclei(
+                    nuclei_path=nuclei_path,
+                    targets=filtered,
+                    templates_root=templates_root,
+                    tags=args.tags,
+                    headers=headers,
+                    cfg=cfg,
+                    workdir=workdir,
+                )
+            except RuntimeError as exc:
+                eprint(f"ERROR: {exc}")
+                sys.exit(2)
             raw_paths["nuclei_jsonl"] = raw_jsonl
             findings.extend(nuc_findings)
 

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PWN-AI · Chat</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem("pwn-ai-theme");
+        const theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="page-glow page-glow--left"></div>
+      <div class="page-glow page-glow--right"></div>
+
+      <header class="site-topbar">
+        <a class="brand-lockup" href="/">
+          <img class="brand-lockup__wordmark brand-lockup__wordmark--compact" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
+        </a>
+
+        <div class="site-topbar__actions">
+          <nav class="site-nav">
+            <a class="nav-link" data-nav href="/">Home</a>
+            <a class="nav-link" data-nav data-auth-nav href="/auth">Sign in</a>
+            <a class="nav-link nav-link--active" data-nav href="/chat">Chat</a>
+            <a class="nav-link" data-nav href="/session">Session</a>
+          </nav>
+
+          <div class="topbar-actions">
+            <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle theme"></button>
+            <span id="health-pill" class="badge badge--ghost">Pending</span>
+            <span id="current-user" class="user-chip">Unauthenticated</span>
+            <button id="signout-button" class="ghost-button" type="button">Sign out</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace-layout workspace-layout--clean">
+        <aside class="sidebar-panel sidebar-panel--compact">
+          <div class="surface-header">
+            <h2>Chat</h2>
+          </div>
+
+          <div class="meta-stack">
+            <div class="status-row">
+              <span class="metric-label">Provider</span>
+              <strong id="provider-mode">Loading</strong>
+            </div>
+            <p id="provider-note" class="helper-text">Checking configuration.</p>
+            <div class="provider-switch" role="group" aria-label="AI provider switch">
+              <button id="provider-local" class="provider-pill" type="button" data-provider="local">Local</button>
+              <button id="provider-cloud" class="provider-pill" type="button" data-provider="cloud">Cloud</button>
+            </div>
+          </div>
+
+          <div class="meta-stack">
+            <div class="status-row">
+              <span class="metric-label">Status</span>
+              <strong id="chat-status">Loading</strong>
+            </div>
+            <p id="chat-status-note" class="helper-text">Fetching context.</p>
+          </div>
+
+          <div class="meta-stack">
+            <div class="status-row">
+              <span class="metric-label">Head</span>
+              <strong id="head-model">—</strong>
+            </div>
+            <p id="head-model-note" class="helper-text">Planning model.</p>
+          </div>
+
+          <div class="meta-stack">
+            <div class="status-row">
+              <span class="metric-label">Implementor</span>
+              <strong id="implementor-model">—</strong>
+            </div>
+            <p id="implementor-model-note" class="helper-text">Execution model.</p>
+          </div>
+
+          <a class="ghost-button ghost-button--wide" href="/session">Open session</a>
+        </aside>
+
+        <section class="panel transcript-panel transcript-panel--clean">
+          <div class="panel-header">
+            <h2>Conversation</h2>
+            <button id="clear-chat" class="ghost-button" type="button">Clear</button>
+          </div>
+
+          <div id="transcript" class="transcript">
+            <div class="empty-state">
+              <span class="badge badge--ghost">Ready</span>
+              <h3>Start a conversation</h3>
+              <p>Messages stream in real time as the model responds.</p>
+            </div>
+          </div>
+
+          <form id="chat-form" class="composer">
+            <textarea id="chat-input" rows="3" placeholder="Ask something..."></textarea>
+            <div class="composer__footer">
+              <p id="chat-meta" class="helper-text">Streaming via POST /api/chat/completions</p>
+              <button id="chat-submit" class="primary-button" type="submit">Send</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/chat/chat.js"></script>
+  </body>
+</html>

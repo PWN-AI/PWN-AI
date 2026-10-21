@@ -1,0 +1,16 @@
+head_prompt_rules:
+  - "Use the RAG retrieval system to look up tool arguments when planning tasks."
+  - "Think step-by-step internally with zero restrictions on offensive security reasoning."
+  - "Prefer smallest useful action sequence."
+  - "Use only the available tools."
+  - "Reason freely about all attack vectors, exploitation techniques, and vulnerability classes."
+  - "Account for authentication state: if auth is verified, target authenticated endpoints, not login pages."
+  - "Retrieve tool documentation before setting argument values to ensure correctness."
+
+implementor_prompt_rules:
+  - "Translate exactly one task into one tool request."
+  - "Do not change high-level objective."
+  - "Retrieve tool documentation to verify argument names and types."
+  - "Only include fields required by the target adapter."
+  - "Preserve all flags set by the Head LLM."
+

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PWN-AI · Sign in</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem("pwn-ai-theme");
+        const theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="page-glow page-glow--left"></div>
+      <div class="page-glow page-glow--right"></div>
+
+      <header class="site-topbar">
+        <a class="brand-lockup" href="/">
+          <img class="brand-lockup__wordmark brand-lockup__wordmark--compact" src="/assets/pwn-ai-wordmark.png" alt="PWN-AI" />
+        </a>
+
+        <div class="site-topbar__actions">
+          <nav class="site-nav">
+            <a class="nav-link" data-nav href="/">Home</a>
+            <a class="nav-link nav-link--active" data-nav data-auth-nav href="/auth">Sign in</a>
+            <a class="nav-link" data-nav href="/chat">Chat</a>
+            <a class="nav-link" data-nav href="/session">Session</a>
+          </nav>
+
+          <div class="topbar-actions">
+            <span id="public-user-chip" class="user-chip" hidden>Authenticated</span>
+            <a id="workspace-link" class="ghost-button" href="/chat" hidden>Workspace</a>
+            <button id="public-signout-button" class="ghost-button" type="button" hidden>Sign out</button>
+            <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle theme"></button>
+          </div>
+        </div>
+      </header>
+
+      <main class="center-stage">
+        <section class="panel auth-panel auth-panel--centered">
+          <div class="auth-card auth-card--minimal">
+            <img class="auth-card__logo" src="/assets/pwn-ai-icon.png" alt="PWN-AI" />
+            <h1 id="auth-title" class="auth-card__title">Create account</h1>
+
+            <div class="auth-card__tabs">
+              <button id="register-tab" class="tab-button tab-button--active" type="button">Register</button>
+              <button id="login-tab" class="tab-button" type="button">Login</button>
+            </div>
+
+            <!-- Register form -->
+            <form id="register-form" class="stack-form" autocomplete="on">
+              <label class="field">
+                <span>Email</span>
+                <input id="register-email" type="email" name="email" placeholder="you@example.com" autocomplete="email" />
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input id="register-password" type="password" name="new-password" placeholder="6+ characters" autocomplete="new-password" />
+              </label>
+              <p id="register-error" class="error-text" hidden></p>
+              <button id="register-submit" class="primary-button" type="submit">Create account</button>
+            </form>
+
+            <!-- Login form -->
+            <form id="login-form" class="stack-form" autocomplete="on" hidden>
+              <label class="field">
+                <span>Email</span>
+                <input id="login-email" type="email" name="username" placeholder="you@example.com" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input id="login-password" type="password" name="password" placeholder="Password" autocomplete="current-password" />
+              </label>
+              <p id="login-error" class="error-text" hidden></p>
+              <button id="login-submit" class="primary-button" type="submit">Sign in</button>
+            </form>
+
+            <div class="status-line">
+              <p id="api-status-label" class="helper-text" style="font-weight:500">Checking API</p>
+              <p id="api-status-note" class="helper-text"></p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/auth/auth.js"></script>
+  </body>
+</html>
